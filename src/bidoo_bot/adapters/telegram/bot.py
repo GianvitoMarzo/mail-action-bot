@@ -14,10 +14,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable
+from dataclasses import dataclass
 
-from telegram import BotCommand, Update
+from telegram import Bot, BotCommand, Update
 from telegram.constants import ChatAction
-from telegram.error import TelegramError
+from telegram.error import Conflict, InvalidToken, TelegramError
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
 
 from bidoo_bot.adapters.telegram.authorization import ACCESS_DENIED_MESSAGE, Authorizer
@@ -212,6 +213,53 @@ def build_application(
     application.add_handler(CommandHandler("bidoo", bot.bidoo))
     application.add_handler(CommandHandler("status", bot.status))
     return application
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramSender:
+    """Someone who has sent a message to the bot."""
+
+    user_id: int
+    name: str = ""
+
+
+def fetch_recent_user_ids(token: str, *, limit: int = 20) -> list[TelegramSender]:
+    """Report the Telegram ids that have messaged the bot recently.
+
+    Solves the chicken-and-egg of the first setup: the bot refuses to start
+    without an allowlist, but you need it running to learn your own id. This
+    reads the pending updates directly instead, so no third-party "what is my
+    id" bot is involved and the token never leaves the process.
+
+    ``getUpdates`` is called without confirming an offset, so the updates stay
+    queued and the bot will still see them later.
+    """
+    register_secret(token)
+
+    async def _read() -> list[TelegramSender]:
+        bot = Bot(token)
+        async with bot:
+            updates = await bot.get_updates(timeout=0, limit=limit)
+        senders: dict[int, TelegramSender] = {}
+        for update in updates:
+            user = update.effective_user
+            if user is not None and user.id not in senders:
+                senders[user.id] = TelegramSender(user_id=user.id, name=user.full_name or "")
+        return list(senders.values())
+
+    try:
+        return asyncio.run(_read())
+    except InvalidToken as exc:
+        raise BidooBotError(
+            "Telegram rejected the token. Check TELEGRAM_BOT_TOKEN in your .env."
+        ) from exc
+    except Conflict as exc:
+        raise BidooBotError(
+            "Telegram is already delivering updates elsewhere: stop any running "
+            "`bidoo-bot bot` (or delete the webhook) and try again."
+        ) from exc
+    except TelegramError as exc:
+        raise BidooBotError(f"could not reach Telegram: {exc}") from exc
 
 
 def run_bot(*, config: AppConfig, secrets: Secrets, service_factory: ServiceFactory) -> None:

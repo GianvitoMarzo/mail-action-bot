@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+import dotenv
 import pytest
 
 from bidoo_bot.application.redeem import RedeemService
@@ -29,11 +30,24 @@ _LEAKY_ENV = (
 )
 
 
+#: The real python-dotenv loader, kept so the one test that needs it can put it
+#: back (see test_config.py::test_load_secrets_does_not_climb_to_a_parent_env).
+real_load_dotenv = dotenv.load_dotenv
+
+
 @pytest.fixture(autouse=True)
 def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Keep the developer's own environment out of the tests."""
+    """Keep the developer's own environment out of the tests.
+
+    Clearing the variables is not enough: ``load_secrets()`` also reads a
+    ``.env`` file, and a developer running the suite from a configured working
+    copy has a real Telegram token sitting right there. Neutralising the loader
+    is what actually guarantees the suite is hermetic -- without it a test can
+    end up making a live API call with a real credential.
+    """
     for name in _LEAKY_ENV:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *_args, **_kwargs: False)
     clear_registered_secrets()
     yield
     clear_registered_secrets()

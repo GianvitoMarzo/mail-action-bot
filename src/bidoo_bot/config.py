@@ -165,7 +165,9 @@ class Secrets:
             )
         if not self.telegram_allowed_user_ids:
             raise ConfigError(
-                "TELEGRAM_ALLOWED_USER_IDS is empty. Refusing to start a bot anyone could use."
+                "TELEGRAM_ALLOWED_USER_IDS is empty. Refusing to start a bot anyone "
+                "could use.\nTo find your own id: send any message to your bot in "
+                "Telegram, then run `bidoo-bot telegram-whoami`."
             )
         return self.telegram_bot_token, self.telegram_allowed_user_ids
 
@@ -558,6 +560,10 @@ def load_secrets(*, env_file: Path | str | None = None, load_dotenv_file: bool =
     """Read secrets from the environment, optionally seeded by a ``.env`` file.
 
     Real environment variables always win over the ``.env`` file.
+
+    The path is always explicit -- ``./.env`` unless told otherwise. python-dotenv
+    would otherwise walk *up* the directory tree, so a stray ``.env`` in a parent
+    folder could silently hand this tool a token meant for something else.
     """
     if load_dotenv_file:
         try:
@@ -565,7 +571,8 @@ def load_secrets(*, env_file: Path | str | None = None, load_dotenv_file: bool =
         except ImportError:  # pragma: no cover - dotenv is a hard dependency
             pass
         else:
-            load_dotenv(dotenv_path=env_file, override=False)
+            path = Path(env_file).expanduser() if env_file else Path.cwd() / ".env"
+            load_dotenv(dotenv_path=path, override=False)
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN") or None
     ids = _parse_user_ids(

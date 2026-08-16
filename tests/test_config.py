@@ -305,3 +305,64 @@ def test_a_missing_env_config_is_reported(monkeypatch: pytest.MonkeyPatch) -> No
 
     with pytest.raises(ConfigError, match="BIDOO_CONFIG"):
         find_config_file()
+
+
+# ---------------------------------------------------------------------------
+# .env discovery
+# ---------------------------------------------------------------------------
+
+
+def test_load_secrets_does_not_climb_to_a_parent_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stray .env in a parent folder must not feed this tool a token.
+
+    python-dotenv's default discovery walks *up* the tree, which would let an
+    unrelated project's credentials leak into bidoo-bot.
+    """
+    import dotenv
+
+    from tests.conftest import real_load_dotenv
+
+    monkeypatch.setattr(dotenv, "load_dotenv", real_load_dotenv)
+
+    (tmp_path / ".env").write_text("TELEGRAM_BOT_TOKEN=999:not-ours\n", "utf-8")
+    workdir = tmp_path / "project"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    assert load_secrets().telegram_bot_token is None
+
+
+def test_load_secrets_reads_the_env_file_in_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import dotenv
+
+    from tests.conftest import real_load_dotenv
+
+    monkeypatch.setattr(dotenv, "load_dotenv", real_load_dotenv)
+
+    (tmp_path / ".env").write_text(
+        "TELEGRAM_BOT_TOKEN=123456:ours\nTELEGRAM_ALLOWED_USER_IDS=42\n", "utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    secrets = load_secrets()
+
+    assert secrets.telegram_bot_token == "123456:ours"
+    assert secrets.telegram_allowed_user_ids == frozenset({42})
+
+
+def test_an_explicit_env_file_path_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import dotenv
+
+    from tests.conftest import real_load_dotenv
+
+    monkeypatch.setattr(dotenv, "load_dotenv", real_load_dotenv)
+
+    elsewhere = tmp_path / "custom.env"
+    elsewhere.write_text("TELEGRAM_ALLOWED_USER_IDS=7\n", "utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert load_secrets(env_file=elsewhere).telegram_allowed_user_ids == frozenset({7})

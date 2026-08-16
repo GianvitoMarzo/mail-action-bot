@@ -170,6 +170,10 @@ cp config.example.yaml config.yaml
 cp .env.example .env
 ```
 
+`.env` is read from the **current working directory** only — deliberately not
+from parent folders, so an unrelated project's `.env` can never hand this tool
+a token. Point somewhere else with `BIDOO_CONFIG` for the config file.
+
 `config.example.yaml` is a full copy of the built-in defaults, so you can
 delete every key you do not want to change — whatever you leave out keeps its
 default value. Validate at any time:
@@ -199,13 +203,37 @@ redeem:
 1. Open Telegram and talk to [@BotFather](https://t.me/BotFather).
 2. `/newbot`, pick a name and a username. BotFather replies with a token.
 3. Put the token in `.env` as `TELEGRAM_BOT_TOKEN`.
-4. Find your own numeric user id: start the bot (`python -m bidoo_bot bot`),
-   send it `/start`, and read the log line:
-   `Denied '/start' from Telegram user id 123456789`.
-5. Put that number in `.env` as `TELEGRAM_ALLOWED_USER_IDS`, restart.
+4. Open Telegram and send any message to your new bot — `/start` is fine. It
+   will not answer yet; that is expected.
+5. Ask which ids have written to it:
+
+   ```bash
+   python -m bidoo_bot telegram-whoami
+   ```
+
+   ```
+   Telegram accounts that recently messaged your bot:
+
+     123456789 — Your Name
+
+   Put *your own* id in .env (leave out anyone you do not recognise):
+
+     TELEGRAM_ALLOWED_USER_IDS=123456789
+   ```
+
+   This reads your bot's pending updates with your own token: no third-party
+   "what is my id" bot is involved, the token never leaves your machine, and
+   the messages stay queued.
+
+6. Paste that line into `.env`, then start the bot:
+
+   ```bash
+   python -m bidoo_bot bot
+   ```
 
 Only ids on that list can use the bot; everyone else gets `Access denied.` and
-nothing more. **The bot refuses to start with an empty allowlist.**
+nothing more. **The bot refuses to start with an empty allowlist** — that is
+why you fill it in before the first start, not after.
 
 ## Google Cloud / Gmail OAuth
 
@@ -317,6 +345,7 @@ python -m bidoo_bot status                  # config + Gmail connectivity
 python -m bidoo_bot check-config            # validate config.yaml
 python -m bidoo_bot gmail-auth              # one-off OAuth
 python -m bidoo_bot bot                     # start the Telegram bot
+python -m bidoo_bot telegram-whoami         # find your Telegram id (first-time setup)
 ```
 
 `-v` for info, `-vv` for debug, `-q` for quiet. After `pip install` the same
@@ -461,7 +490,7 @@ pip install -e ".[dev]"
 ruff format .           # format
 ruff check .            # lint
 mypy                    # type check (strict on src/)
-pytest                  # 250 tests, no network, no credentials
+pytest                  # 263 tests, no network, no credentials
 ```
 
 Every test runs against the packaged defaults and uses in-memory fakes for
@@ -499,6 +528,15 @@ Refusing is intentional. Distinguish them with a signal, or lower the margin.
 
 **Playwright: "the profile does not exist yet"** — run
 `python -m bidoo_bot browser-login` first.
+
+**`TELEGRAM_ALLOWED_USER_IDS is empty. Refusing to start...`** — the bot will
+not start until you allowlist yourself. Send any message to the bot in
+Telegram, then run `python -m bidoo_bot telegram-whoami` to get your id.
+
+**`telegram-whoami` says "No pending messages"** — you have not written to the
+bot yet, or something already collected the updates. Send it a message and run
+the command again. If it reports that Telegram is "already delivering updates
+elsewhere", stop the running `bidoo-bot bot` first.
 
 **Telegram: nothing happens** — check the logs for
 `Denied '/bidoo' from Telegram user id ...` and add that id to

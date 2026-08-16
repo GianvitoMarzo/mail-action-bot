@@ -304,3 +304,54 @@ def test_verbosity_flags(argv: list[str], expected: str) -> None:
     run([*argv, "check-config"])
 
     assert logging.getLogger().level == getattr(logging, expected)
+
+
+# ---------------------------------------------------------------------------
+# telegram-whoami
+# ---------------------------------------------------------------------------
+
+
+def test_whoami_needs_a_token_first(capsys: pytest.CaptureFixture) -> None:
+    code, _ = run(["telegram-whoami"])
+
+    assert code == cli.EXIT_ERROR
+    assert "TELEGRAM_BOT_TOKEN is not set" in capsys.readouterr().err
+
+
+def test_whoami_lists_senders_and_the_line_to_paste(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bidoo_bot.adapters.telegram.bot import TelegramSender
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:abcdefghijklmnopqrstuvwxyz0123456789")
+    monkeypatch.setattr(
+        "bidoo_bot.adapters.telegram.bot.fetch_recent_user_ids",
+        lambda _token: [TelegramSender(424242, "Owner"), TelegramSender(999, "Someone")],
+    )
+
+    code, output = run(["telegram-whoami"])
+
+    assert code == cli.EXIT_OK
+    assert "424242 — Owner" in output
+    assert "TELEGRAM_ALLOWED_USER_IDS=424242,999" in output
+    assert "do not recognise" in output, "must warn before pasting a stranger's id"
+
+
+def test_whoami_tells_you_to_message_the_bot_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:abcdefghijklmnopqrstuvwxyz0123456789")
+    monkeypatch.setattr("bidoo_bot.adapters.telegram.bot.fetch_recent_user_ids", lambda _token: [])
+
+    code, output = run(["telegram-whoami"])
+
+    assert code == cli.EXIT_ERROR
+    assert "send any message to your bot" in output
+
+
+def test_bot_error_without_an_allowlist_points_at_whoami(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The exact dead-end a first-time user hits."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:abcdefghijklmnopqrstuvwxyz0123456789")
+
+    code, _ = run(["bot"])
+
+    assert code == cli.EXIT_ERROR
+    assert "telegram-whoami" in capsys.readouterr().err

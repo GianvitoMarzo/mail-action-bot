@@ -20,7 +20,7 @@ from bidoo_bot import __version__
 from bidoo_bot.application.redeem import RedeemOptions
 from bidoo_bot.config import AppConfig, dry_run_from_env, load_config, load_secrets
 from bidoo_bot.container import build_service, build_service_factory
-from bidoo_bot.errors import BidooBotError
+from bidoo_bot.errors import BidooBotError, ConfigError
 from bidoo_bot.logging_config import configure_logging, get_logger
 from bidoo_bot.models.candidate import ParseStatus
 from bidoo_bot.parsing.action_parser import ActionParser
@@ -105,6 +105,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     bot = subparsers.add_parser("bot", help="run the Telegram bot (long polling)")
     bot.set_defaults(func=cmd_bot)
+
+    whoami = subparsers.add_parser(
+        "telegram-whoami",
+        help="print the Telegram user ids that have messaged your bot (first-time setup)",
+    )
+    whoami.set_defaults(func=cmd_telegram_whoami)
 
     auth = subparsers.add_parser("gmail-auth", help="run the Gmail OAuth flow once, interactively")
     auth.set_defaults(func=cmd_gmail_auth)
@@ -247,6 +253,39 @@ def cmd_bot(_args: argparse.Namespace, config: AppConfig, out: TextIO) -> int:
     if config.redeem.dry_run:
         out.write("Starting in DRY RUN mode: /bidoo will analyse but not execute.\n")
     run_bot(config=config, secrets=secrets, service_factory=build_service_factory(config))
+    return EXIT_OK
+
+
+def cmd_telegram_whoami(_args: argparse.Namespace, _config: AppConfig, out: TextIO) -> int:
+    """Print who has messaged the bot, so you can fill in the allowlist."""
+    from bidoo_bot.adapters.telegram.bot import fetch_recent_user_ids
+
+    secrets = load_secrets()
+    if not secrets.telegram_bot_token:
+        raise ConfigError(
+            "TELEGRAM_BOT_TOKEN is not set. Copy .env.example to .env and put the "
+            "token from @BotFather in it first."
+        )
+
+    senders = fetch_recent_user_ids(secrets.telegram_bot_token)
+    if not senders:
+        out.write(
+            "No pending messages.\n\n"
+            "Open Telegram, send any message to your bot (for example /start), "
+            "then run this command again.\n"
+        )
+        return EXIT_ERROR
+
+    out.write("Telegram accounts that recently messaged your bot:\n\n")
+    for sender in senders:
+        label = f" — {sender.name}" if sender.name else ""
+        out.write(f"  {sender.user_id}{label}\n")
+
+    ids = ",".join(str(sender.user_id) for sender in senders)
+    out.write(
+        "\nPut *your own* id in .env (leave out anyone you do not recognise):\n"
+        f"\n  TELEGRAM_ALLOWED_USER_IDS={ids}\n"
+    )
     return EXIT_OK
 
 

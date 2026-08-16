@@ -15,7 +15,7 @@ from bidoo_bot.adapters.telegram.authorization import ACCESS_DENIED_MESSAGE, Aut
 from bidoo_bot.adapters.telegram.bot import BidooTelegramBot, _chunks
 from bidoo_bot.application.redeem import RedeemService
 from bidoo_bot.config import AppConfig, Secrets
-from bidoo_bot.errors import ConfigError, MailboxError
+from bidoo_bot.errors import BidooBotError, ConfigError, MailboxError
 from tests.fakes import GOOD_HTML, FakeMailbox, make_email
 
 OWNER = 424242
@@ -260,3 +260,119 @@ def test_long_messages_are_split_on_line_boundaries() -> None:
     assert len(parts) > 1
     assert all(len(part) <= 200 for part in parts)
     assert "".join(parts) == text
+
+
+# ---------------------------------------------------------------------------
+# First-time setup: discovering your own user id
+# ---------------------------------------------------------------------------
+
+
+def test_the_empty_allowlist_error_says_how_to_fix_it() -> None:
+    """Regression: the bot refuses to start without an allowlist, so the error
+    must point at the command that finds your id -- otherwise setup dead-ends."""
+    with pytest.raises(ConfigError) as excinfo:
+        Secrets(telegram_bot_token="123456:token-shaped-value").require_telegram()
+
+    message = str(excinfo.value)
+    assert "telegram-whoami" in message
+    assert "send any message to your bot" in message
+
+
+def test_fetch_recent_user_ids_dedupes_and_keeps_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bidoo_bot.adapters.telegram import bot as bot_module
+
+    @dataclass
+    class StubUpdateUser:
+        id: int
+        full_name: str
+
+    @dataclass
+    class StubGetUpdate:
+        effective_user: StubUpdateUser | None
+
+    class StubBot:
+        def __init__(self, token: str) -> None:
+            self.token = token
+
+        async def __aenter__(self) -> StubBot:
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+        async def get_updates(self, **_kwargs: Any) -> list[StubGetUpdate]:
+            return [
+                StubGetUpdate(StubUpdateUser(OWNER, "Owner")),
+                StubGetUpdate(StubUpdateUser(OWNER, "Owner")),  # duplicate
+                StubGetUpdate(None),  # no user (e.g. a channel post)
+                StubGetUpdate(StubUpdateUser(STRANGER, "Someone Else")),
+            ]
+
+    monkeypatch.setattr(bot_module, "Bot", StubBot)
+
+    senders = bot_module.fetch_recent_user_ids("123456:abcdefghijklmnopqrstuvwxyz0123456789")
+
+    assert [s.user_id for s in senders] == [OWNER, STRANGER]
+    assert senders[0].name == "Owner"
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        ("invalid-token", "Check TELEGRAM_BOT_TOKEN"),
+        ("conflict", "already delivering updates elsewhere"),
+        ("other", "could not reach Telegram"),
+    ],
+)
+def test_fetch_recent_user_ids_translates_telegram_errors(
+    monkeypatch: pytest.MonkeyPatch, error: str, expected: str
+) -> None:
+    from telegram.error import Conflict, InvalidToken, TelegramError
+
+    from bidoo_bot.adapters.telegram import bot as bot_module
+
+    raised = {
+        "invalid-token": InvalidToken(),
+        "conflict": Conflict("terminated by other getUpdates request"),
+        "other": TelegramError("network is down"),
+    }[error]
+
+    class ExplodingBot:
+        def __init__(self, token: str) -> None:
+            pass
+
+        async def __aenter__(self) -> ExplodingBot:
+            raise raised
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+    monkeypatch.setattr(bot_module, "Bot", ExplodingBot)
+
+    with pytest.raises(BidooBotError, match=expected):
+        bot_module.fetch_recent_user_ids("123456:abcdefghijklmnopqrstuvwxyz0123456789")
+
+
+def test_the_token_is_registered_for_redaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    from bidoo_bot.adapters.telegram import bot as bot_module
+    from bidoo_bot.logging_config import redact
+
+    token = "7891234567:AAH9xKq2LmNoPqRsTuVwXyZ0123456789abc"
+
+    class StubBot:
+        def __init__(self, token: str) -> None:
+            pass
+
+        async def __aenter__(self) -> StubBot:
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+        async def get_updates(self, **_kwargs: Any) -> list[Any]:
+            return []
+
+    monkeypatch.setattr(bot_module, "Bot", StubBot)
+    bot_module.fetch_recent_user_ids(token)
+
+    assert token not in redact(f"using {token}")
