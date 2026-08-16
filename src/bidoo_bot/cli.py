@@ -25,9 +25,9 @@ from bidoo_bot.config import (
     AppConfig,
     build_config,
     default_config_dict,
-    dry_run_from_env,
     load_config,
     load_secrets,
+    obsolete_env_vars_in_use,
 )
 from bidoo_bot.container import build_service, build_service_factory
 from bidoo_bot.errors import BidooBotError, ConfigError
@@ -91,7 +91,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="analyse only (--no-dry-run to actually execute); defaults to redeem.dry_run",
+        help=(
+            "analyse only (--no-dry-run to actually execute); "
+            "defaults to redeem.dry_run in config.yaml"
+        ),
     )
     redeem.add_argument("--max-results", type=int, default=None, help="override gmail.max_results")
     redeem.add_argument("--query", default=None, help="override the Gmail query for this run")
@@ -144,10 +147,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_redeem(args: argparse.Namespace, config: AppConfig, out: TextIO) -> int:
-    dry_run = args.dry_run if args.dry_run is not None else dry_run_from_env()
+    # args.dry_run is None unless --dry-run/--no-dry-run was passed; the
+    # service then falls back to redeem.dry_run from config.yaml.
     service = build_service(config)
     report = service.run(
-        RedeemOptions(dry_run=dry_run, max_results=args.max_results, query=args.query)
+        RedeemOptions(dry_run=args.dry_run, max_results=args.max_results, query=args.query)
     )
     if args.json:
         json.dump(report_to_dict(report), out, indent=2, ensure_ascii=False)
@@ -405,6 +409,13 @@ def main(argv: list[str] | None = None, *, out: TextIO | None = None) -> int:
         redact_records=config.logging.redact,
         secrets=(secrets.telegram_bot_token,),
     )
+
+    for name, replacement in obsolete_env_vars_in_use():
+        logger.warning(
+            "%s is set but no longer does anything — it is ignored. Use %s instead.",
+            name,
+            replacement,
+        )
 
     try:
         return int(args.func(args, config, stream))

@@ -10,10 +10,10 @@ import yaml
 from bidoo_bot.config import (
     build_config,
     default_config_dict,
-    dry_run_from_env,
     find_config_file,
     load_config,
     load_secrets,
+    obsolete_env_vars_in_use,
 )
 from bidoo_bot.errors import ConfigError
 
@@ -273,23 +273,34 @@ def test_a_non_numeric_user_id_is_reported(monkeypatch: pytest.MonkeyPatch) -> N
         load_secrets(load_dotenv_file=False)
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [("1", True), ("true", True), ("YES", True), ("0", False), ("off", False), ("", None)],
-)
-def test_dry_run_env_override(
-    monkeypatch: pytest.MonkeyPatch, raw: str, expected: bool | None
-) -> None:
-    monkeypatch.setenv("BIDOO_DRY_RUN", raw)
+def test_the_dry_run_env_var_is_gone_and_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dry-run has one source of truth. A stale variable must not be silent.
 
-    assert dry_run_from_env() is expected
+    BIDOO_DRY_RUN used to be honoured only by the `redeem` CLI command, so it
+    was possible to set it to 1, feel protected, and have the Telegram bot
+    execute anyway.
+    """
+    assert obsolete_env_vars_in_use() == []
+
+    monkeypatch.setenv("BIDOO_DRY_RUN", "1")
+
+    stale = obsolete_env_vars_in_use()
+    assert [name for name, _ in stale] == ["BIDOO_DRY_RUN"]
+    assert "redeem.dry_run" in stale[0][1]
 
 
-def test_an_unparseable_dry_run_override_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BIDOO_DRY_RUN", "maybe")
+def test_an_empty_stale_variable_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BIDOO_DRY_RUN", "  ")
 
-    with pytest.raises(ConfigError, match="BIDOO_DRY_RUN"):
-        dry_run_from_env()
+    assert obsolete_env_vars_in_use() == []
+
+
+def test_dry_run_comes_only_from_the_config() -> None:
+    data = default_config_dict()
+    data["redeem"]["dry_run"] = False
+
+    assert build_config(data).redeem.dry_run is False
+    assert build_config(default_config_dict()).redeem.dry_run is True
 
 
 def test_bidoo_config_env_var_is_honoured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

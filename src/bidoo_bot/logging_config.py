@@ -162,7 +162,9 @@ def configure_logging(
 ) -> None:
     """Install a single stderr handler on the root logger.
 
-    Safe to call more than once: previous handlers installed here are replaced.
+    Removes every handler already on the root logger, so calling this twice is
+    safe but it is not polite to a host application that configured its own.
+    Only entry points (the CLI, a serverless handler) should call it.
     """
     for secret in secrets:
         register_secret(secret)

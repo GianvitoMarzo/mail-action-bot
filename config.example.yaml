@@ -178,8 +178,10 @@ redeem:
   # "playwright" drives a persistent browser profile you logged into by hand.
   # Start with "http": only switch if the site really needs a browser session.
   strategy: "http"
-  # Safety default. Nothing is ever executed until you flip this to false
-  # (or pass --no-dry-run / set BIDOO_DRY_RUN=0).
+  # Safety default and the single source of truth for dry-run: the Telegram
+  # bot, the CLI and any other interface all read this one value. Nothing is
+  # ever executed until you flip it to false. The CLI can override it for a
+  # single run with --no-dry-run.
   dry_run: true
   # Pause between two redeem actions in the same run, to stay polite.
   delay_between_actions_seconds: 2.0

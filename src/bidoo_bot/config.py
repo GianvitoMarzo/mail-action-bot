@@ -581,14 +581,24 @@ def load_secrets(*, env_file: Path | str | None = None, load_dotenv_file: bool =
     return Secrets(telegram_bot_token=token, telegram_allowed_user_ids=ids)
 
 
-def dry_run_from_env() -> bool | None:
-    """``BIDOO_DRY_RUN`` override, or ``None`` when unset."""
-    raw = os.environ.get("BIDOO_DRY_RUN")
-    if raw is None or raw.strip() == "":
-        return None
-    value = raw.strip().lower()
-    if value in ("1", "true", "yes", "on"):
-        return True
-    if value in ("0", "false", "no", "off"):
-        return False
-    raise ConfigError(f"BIDOO_DRY_RUN must be a boolean-ish value, got {raw!r}")
+#: Environment variables that used to do something and no longer do, mapped to
+#: what replaced them.
+#:
+#: BIDOO_DRY_RUN was only ever honoured by the `redeem` CLI command: the
+#: Telegram bot always fell back to the config file. Someone could therefore set
+#: BIDOO_DRY_RUN=1, believe they were protected, and have the bot execute
+#: anyway. Rather than paper over that with a second code path, dry-run now has
+#: exactly one source of truth -- redeem.dry_run in config.yaml -- and a stale
+#: variable is reported instead of being silently ignored.
+OBSOLETE_ENV_VARS: dict[str, str] = {
+    "BIDOO_DRY_RUN": "redeem.dry_run in config.yaml",
+}
+
+
+def obsolete_env_vars_in_use() -> list[tuple[str, str]]:
+    """Return ``(variable, replacement)`` for every stale variable that is set."""
+    return [
+        (name, replacement)
+        for name, replacement in OBSOLETE_ENV_VARS.items()
+        if os.environ.get(name, "").strip()
+    ]

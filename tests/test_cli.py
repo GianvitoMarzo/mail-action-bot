@@ -178,26 +178,43 @@ def test_redeem_no_dry_run_executes(wired: FakeMailbox, redeemer: FakeRedeemer) 
     assert len(redeemer.calls) == 1
 
 
-def test_redeem_honours_the_env_override(
+def test_redeem_ignores_the_removed_env_var(
     wired: FakeMailbox, redeemer: FakeRedeemer, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """BIDOO_DRY_RUN is gone: config.yaml decides, and dry-run stays on."""
     monkeypatch.setenv("BIDOO_DRY_RUN", "0")
     wired.messages = [make_email(html=GOOD_HTML)]
+
+    code, output = run(["redeem"])
+
+    assert code == cli.EXIT_OK
+    assert redeemer.calls == [], "a stale env var must never enable execution"
+    assert "DRY RUN" in output
+
+
+def test_a_stale_env_var_is_warned_about(
+    wired: FakeMailbox, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    # Asserted on stderr rather than caplog: configure_logging() installs its
+    # own handler and drops the ones already on the root logger.
+    monkeypatch.setenv("BIDOO_DRY_RUN", "0")
+    wired.messages = []
 
     run(["redeem"])
 
-    assert len(redeemer.calls) == 1
+    stderr = capsys.readouterr().err
+    assert "BIDOO_DRY_RUN" in stderr
+    assert "no longer does anything" in stderr
 
 
-def test_an_explicit_flag_beats_the_env_override(
-    wired: FakeMailbox, redeemer: FakeRedeemer, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("BIDOO_DRY_RUN", "0")
+def test_the_flag_still_overrides_the_config(wired: FakeMailbox, redeemer: FakeRedeemer) -> None:
     wired.messages = [make_email(html=GOOD_HTML)]
 
-    run(["redeem", "--dry-run"])
+    run(["redeem", "--no-dry-run"])
+    assert len(redeemer.calls) == 1
 
-    assert redeemer.calls == []
+    run(["redeem", "--dry-run"])
+    assert len(redeemer.calls) == 1, "--dry-run must put it back"
 
 
 def test_redeem_json_output(wired: FakeMailbox) -> None:

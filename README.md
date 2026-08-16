@@ -395,8 +395,25 @@ Details:
 ```
 
 Nothing is requested, nothing is labelled, and the browser is never even
-started. Override per run with `--no-dry-run`, or globally with
-`BIDOO_DRY_RUN=0`. An explicit flag always beats the environment variable.
+started.
+
+`redeem.dry_run` in `config.yaml` is the **single source of truth**: the
+Telegram bot, the CLI and any future interface all read that one value. To go
+live permanently:
+
+```yaml
+redeem:
+  dry_run: false
+```
+
+The CLI can override it for one run with `--no-dry-run` (or force it back on
+with `--dry-run`); the Telegram bot deliberately has no such override, so
+`/status` always tells you the truth about what `/bidoo` will do.
+
+There is no environment variable for this on purpose. An earlier
+`BIDOO_DRY_RUN` was honoured only by the CLI, which meant you could set it to
+`1`, believe you were protected, and have the bot execute anyway. If it is
+still set anywhere, bidoo-bot warns that it is being ignored.
 
 ## Bidoo redeem strategies
 
@@ -505,7 +522,7 @@ pip install -e ".[dev]"
 ruff format .           # format
 ruff check .            # lint
 mypy                    # type check (strict on src/)
-pytest                  # 276 tests, no network, no credentials
+pytest                  # 273 tests, no network, no credentials
 ```
 
 Every test runs against the packaged defaults and uses in-memory fakes for
