@@ -209,8 +209,16 @@ redeem:
     # Extra wait after load, for pages that finish the redeem in JS.
     settle_seconds: 2.0
     # Same semantics as the http block, checked against the rendered page text.
+    # Leave success_patterns empty until you have seen what a successful redeem
+    # actually renders, then add it: with no success pattern, any page that
+    # loads at all counts as a success.
     success_patterns: []
-    failure_patterns: []
+    # A redeem link that needs a session bounces to the login page when the
+    # profile is not signed in. Without this, the browser strategy would report
+    # that bounce as a success -- the http block has had the same guard from
+    # the start.
+    failure_patterns:
+      - '(sessione scaduta|session expired|effettua il login|please log in)'
     # Directory for debug screenshots, or null to disable.
     screenshot_dir: null
 
