@@ -29,7 +29,8 @@ DEFAULT_CONFIG_FILENAMES = ("config.yaml", "config.yml")
 
 SignalField = Literal["text", "url", "attrs", "context", "any"]
 _SIGNAL_FIELDS: tuple[str, ...] = ("text", "url", "attrs", "context", "any")
-_STRATEGIES: tuple[str, ...] = ("http", "playwright")
+_STRATEGIES: tuple[str, ...] = ("http", "playwright", "manual")
+_ON_CONFIRM: tuple[str, ...] = ("trash", "label")
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +111,29 @@ class PlaywrightSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ManualSettings:
+    """Settings for ``strategy: manual``, where *you* open the link."""
+
+    on_confirm: str
+    """``trash`` moves the mail to Gmail's Trash, ``label`` only labels it."""
+
+    @property
+    def trash_on_confirm(self) -> bool:
+        return self.on_confirm == "trash"
+
+
+@dataclass(frozen=True, slots=True)
 class RedeemSettings:
     strategy: str
     dry_run: bool
     delay_between_actions_seconds: float
     http: HttpSettings
     playwright: PlaywrightSettings
+    manual: ManualSettings
+
+    @property
+    def is_manual(self) -> bool:
+        return self.strategy == "manual"
 
 
 @dataclass(frozen=True, slots=True)
@@ -422,6 +440,14 @@ def _build_playwright(data: Mapping[str, Any]) -> PlaywrightSettings:
     )
 
 
+def _build_manual(data: Mapping[str, Any]) -> ManualSettings:
+    where = "redeem.manual"
+    on_confirm = _as_str(data, "on_confirm", where)
+    if on_confirm not in _ON_CONFIRM:
+        raise ConfigError(f"'{where}.on_confirm' must be one of {', '.join(_ON_CONFIRM)}")
+    return ManualSettings(on_confirm=on_confirm)
+
+
 def _build_redeem(data: Mapping[str, Any]) -> RedeemSettings:
     where = "redeem"
     strategy = _as_str(data, "strategy", where)
@@ -435,6 +461,7 @@ def _build_redeem(data: Mapping[str, Any]) -> RedeemSettings:
         ),
         http=_build_http(_section(data, "http")),
         playwright=_build_playwright(_section(data, "playwright")),
+        manual=_build_manual(_section(data, "manual")),
     )
 
 

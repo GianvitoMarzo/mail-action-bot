@@ -360,6 +360,7 @@ python -m bidoo_bot status                  # config + Gmail connectivity
 python -m bidoo_bot check-config            # validate config.yaml
 python -m bidoo_bot gmail-auth              # one-off OAuth
 python -m bidoo_bot bot                     # start the Telegram bot
+python -m bidoo_bot confirm <message_id>    # mark a manually opened link as done
 python -m bidoo_bot telegram-whoami         # find your Telegram id (first-time setup)
 ```
 
@@ -370,7 +371,8 @@ same commands are available as `bidoo-bot ...`.
 
 The Telegram bot answers `/start`, `/help`, `/bidoo` and `/status`. `/bidoo`
 acknowledges immediately ("🔎 Checking your mailbox…"), does the work in a
-worker thread, and replies with the summary. Two concurrent `/bidoo` are
+worker thread, and replies with the summary — followed, in `manual` mode, by
+one message per link with a confirmation button. Two concurrent `/bidoo` are
 serialised — the second one is told to wait.
 
 **The CLI and the bot call the exact same `RedeemService`.** There is no second
@@ -419,13 +421,61 @@ still set anywhere, bidoo-bot warns that it is being ignored.
 
 ## Bidoo redeem strategies
 
-**Start with `http`.** It performs one GET on the validated URL, following
-redirects one hop at a time and re-checking the allowlist at *every* hop.
-Success is decided by the status code plus the optional
-`success_patterns`/`failure_patterns` regexes.
+Three answers to "who actually opens the link", set by `redeem.strategy`:
 
-Switch to `playwright` only if the redeem genuinely needs a logged-in browser
-session:
+| strategy | who opens the link | when to use it |
+|---|---|---|
+| `http` | the bot, with one plain GET | the link works without being logged in |
+| `manual` | **you** | the link needs a session your own browser already has |
+| `playwright` | the bot, in a browser profile you signed into by hand | as above, but you want it unattended |
+
+**Start with `http`** and find out which case you are in:
+
+```bash
+python -m bidoo_bot redeem --no-dry-run -v
+```
+
+If the run reports `FAILED` with something about logging in, the redeem needs a
+session and `http` can never work. That is not a bug — the default
+`failure_patterns` exist to catch exactly that instead of reporting a login
+page as a success.
+
+### manual — you click, the bot tidies up
+
+The pragmatic option, and the one to reach for first when a session is
+required: your phone browser is already signed in.
+
+```yaml
+redeem:
+  strategy: "manual"
+  manual:
+    on_confirm: "trash"   # or "label" to keep the email
+```
+
+`/bidoo` then sends you one message per email — subject, link text and the URL
+— each with a **✅ Fatto** button. You open the link yourself; when you press
+the button the bot applies the processed label and moves that email to Gmail's
+**Trash** (recoverable for 30 days; nothing is ever deleted permanently, and
+the OAuth scope could not do it anyway).
+
+The link is still validated against the allowlist before you ever see it: a
+candidate pointing off-domain is reported as `REJECTED` and never handed over.
+
+Nothing happens until you press the button. An unopened link is simply offered
+again on the next `/bidoo`, which is what makes the mode safe: the bot cannot
+observe your click, so it never assumes one.
+
+Without Telegram, the same flow from the CLI:
+
+```bash
+python -m bidoo_bot redeem --json     # read message_id from the output
+python -m bidoo_bot confirm <message_id> [<message_id> ...]
+```
+
+### playwright — unattended, in a real browser
+
+Use it if you want the bot to do the clicking despite the session
+requirement:
 
 ```bash
 pip install -e ".[playwright]"
@@ -447,7 +497,8 @@ Set `redeem.playwright.headless: false` while debugging to watch what happens.
 The simplest thing that is also robust: **Gmail labels are the store.** No
 database, no Firestore.
 
-- After a successful redeem the message gets `Bidoo/Processed`.
+- After a successful redeem the message gets `Bidoo/Processed`. In `manual`
+  mode that happens when you confirm, not before.
 - `-label:"Bidoo/Processed"` is appended to your query automatically, so
   processed mail is not even fetched.
 - Independently, the service skips any message that already carries the label —
@@ -524,7 +575,7 @@ pip install -e ".[dev]"
 ruff format .           # format
 ruff check .            # lint
 mypy                    # type check (strict on src/)
-pytest                  # 281 tests, no network, no credentials
+pytest                  # 301 tests, no network, no credentials
 ```
 
 Every test runs against the packaged defaults and uses in-memory fakes for
@@ -594,9 +645,10 @@ real email or a credential.
 - **The default redeem patterns are guesses.** No real Bidoo email was
   available while writing this. Expect to tune `parser.signals` and
   `security.allowed_domains` — `analyze-email` exists exactly for that.
-- **Success detection is shallow by default.** The HTTP strategy treats any 2xx
-  as success unless you configure `success_patterns`. Once you know what a
-  redeemed page looks like, set them.
+- **Success detection is shallow by default.** The HTTP and Playwright
+  strategies treat any page that loads as success unless you configure
+  `success_patterns`. Once you know what a redeemed page looks like, set them.
+  `manual` mode sidesteps this entirely: you saw the result yourself.
 - **Single Gmail account**, single user.
 - **Long polling only** for Telegram; no webhook server is included.
 - **The Playwright strategy is written but unverified against the real site**,

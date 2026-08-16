@@ -35,7 +35,7 @@ from bidoo_bot.logging_config import configure_logging, get_logger
 from bidoo_bot.models.candidate import ParseStatus
 from bidoo_bot.parsing.action_parser import ActionParser
 from bidoo_bot.parsing.eml import load_email_file
-from bidoo_bot.reporting import format_report, format_status, report_to_dict
+from bidoo_bot.reporting import format_confirm, format_report, format_status, report_to_dict
 from bidoo_bot.security import UrlPolicy
 
 logger = get_logger(__name__)
@@ -148,6 +148,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     bot = subparsers.add_parser("bot", help="run the Telegram bot (long polling)")
     bot.set_defaults(func=cmd_bot)
+
+    confirm = subparsers.add_parser(
+        "confirm",
+        help="mark links you opened yourself as done (label, and move to Trash)",
+    )
+    confirm.add_argument(
+        "message_ids",
+        nargs="+",
+        metavar="MESSAGE_ID",
+        help="Gmail message ids, as printed by `redeem --json`",
+    )
+    confirm.set_defaults(func=cmd_confirm)
 
     whoami = subparsers.add_parser(
         "telegram-whoami",
@@ -264,6 +276,14 @@ def cmd_analyze_email(args: argparse.Namespace, config: AppConfig, out: TextIO) 
         out.write("\n⚠️ No action would be taken for this email.\n")
 
     return EXIT_OK if (result.ok and allowed_best) else EXIT_NO_CANDIDATE
+
+
+def cmd_confirm(args: argparse.Namespace, config: AppConfig, out: TextIO) -> int:
+    """Counterpart of `strategy: manual` for people not using Telegram."""
+    service = build_service(config)
+    report = service.confirm(args.message_ids)
+    out.write(format_confirm(report) + "\n")
+    return EXIT_OK if report.ok else EXIT_ERROR
 
 
 def cmd_status(args: argparse.Namespace, config: AppConfig, out: TextIO) -> int:

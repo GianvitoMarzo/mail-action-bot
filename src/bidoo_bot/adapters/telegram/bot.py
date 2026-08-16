@@ -16,24 +16,35 @@ import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from telegram import Bot, BotCommand, Update
+from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.error import Conflict, InvalidToken, TelegramError
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    Application,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+)
 
 from bidoo_bot.adapters.telegram.authorization import ACCESS_DENIED_MESSAGE, Authorizer
 from bidoo_bot.application.redeem import RedeemOptions, RedeemService
 from bidoo_bot.config import AppConfig, Secrets
 from bidoo_bot.errors import BidooBotError
 from bidoo_bot.logging_config import get_logger, register_secret
-from bidoo_bot.models.results import StatusReport
-from bidoo_bot.reporting import format_report, format_status
+from bidoo_bot.models.results import ConfirmReport, MessageStatus, RedeemReport, StatusReport
+from bidoo_bot.reporting import format_confirm, format_report, format_status
 
 logger = get_logger(__name__)
 
 ServiceFactory = Callable[[], RedeemService]
 
 _TELEGRAM_MAX_CHARS = 4000
+
+#: Callback payload prefix. Telegram caps callback_data at 64 bytes; a Gmail
+#: message id is ~16 hex characters, so this fits comfortably.
+DONE_PREFIX = "done:"
+BUTTON_DONE = "✅ Fatto, riscattata"
 
 START_TEXT = (
     "🎁 bidoo-bot\n\n"
@@ -44,7 +55,7 @@ START_TEXT = (
 
 HELP_TEXT = (
     "Commands:\n"
-    "/bidoo — check the mailbox now and redeem what I find\n"
+    "/bidoo — check the mailbox now and hand me the links to open\n"
     "/status — show the current configuration and Gmail connectivity\n"
     "/help — this message\n\n"
     "Nothing runs on a schedule: I only act on /bidoo."
@@ -107,7 +118,7 @@ class BidooTelegramBot:
             await self._reply(update, f"🔎 Checking your mailbox{mode}…")
             await self._typing(update)
             try:
-                text = await asyncio.to_thread(self._run_blocking)
+                report = await asyncio.to_thread(self._run_blocking)
             except BidooBotError as exc:
                 logger.error("Redeem run failed: %s", exc)
                 await self._reply(update, f"⚠️ {exc}")
@@ -116,18 +127,113 @@ class BidooTelegramBot:
                 logger.exception("Unexpected error during a redeem run")
                 await self._reply(update, "⚠️ Something went wrong. Check the logs.")
                 return
-        await self._reply(update, text)
+
+        # Each link gets its own message below, so keep them out of the
+        # summary rather than sending every URL twice.
+        has_links = any(r.status is MessageStatus.MANUAL and r.candidate for r in report.results)
+        await self._reply(
+            update,
+            format_report(
+                report,
+                max_detail_lines=self._config.telegram.max_detail_lines,
+                show_urls=self._config.telegram.show_urls_in_dry_run and not has_links,
+            ),
+        )
+        await self._send_manual_links(update, report)
+
+    async def _send_manual_links(self, update: Update, report: RedeemReport) -> None:
+        """One message per link to open, each with its own "done" button.
+
+        The bot cannot see your click, so the button is how a message gets
+        marked as handled. Until you press it nothing is labelled and nothing
+        is moved, which means an unopened link simply shows up again next time.
+        """
+        pending = [r for r in report.results if r.status is MessageStatus.MANUAL and r.candidate]
+        if not pending:
+            return
+
+        message = update.effective_message
+        if message is None:  # pragma: no cover - defensive
+            return
+
+        for result in pending:
+            candidate = result.candidate
+            if candidate is None:  # pragma: no cover - filtered above
+                continue
+            text = (
+                f"🔗 {result.subject}\n\n"
+                f"{candidate.text}\n"
+                f"{candidate.url}\n\n"
+                "Open it, then confirm below."
+            )
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            BUTTON_DONE, callback_data=f"{DONE_PREFIX}{result.message_id}"
+                        )
+                    ]
+                ]
+            )
+            try:
+                await message.reply_text(text, reply_markup=keyboard, disable_web_page_preview=True)
+            except TelegramError as exc:
+                logger.error("Could not send a link message: %s", exc)
+                return
+
+    async def on_done(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle the "done" button: label the mail and move it to Trash."""
+        query = update.callback_query
+        if query is None:  # pragma: no cover - defensive
+            return
+
+        user = update.effective_user
+        user_id = user.id if user else None
+        if not self._authorizer.is_authorized(user_id):
+            # A callback carries a user id like any other update, and it must
+            # be checked exactly like a command.
+            self._authorizer.log_denied(user_id, "button:done")
+            with contextlib.suppress(TelegramError):
+                await query.answer(ACCESS_DENIED_MESSAGE, show_alert=True)
+            return
+
+        data = query.data or ""
+        if not data.startswith(DONE_PREFIX):  # pragma: no cover - defensive
+            with contextlib.suppress(TelegramError):
+                await query.answer()
+            return
+        message_id = data[len(DONE_PREFIX) :]
+
+        try:
+            confirm_report = await asyncio.to_thread(self._confirm_blocking, message_id)
+        except BidooBotError as exc:
+            logger.error("Confirm failed: %s", exc)
+            with contextlib.suppress(TelegramError):
+                await query.answer(f"⚠️ {exc}"[:200], show_alert=True)
+            return
+        except Exception:
+            logger.exception("Unexpected error while confirming")
+            with contextlib.suppress(TelegramError):
+                await query.answer("⚠️ Something went wrong.", show_alert=True)
+            return
+
+        ok = confirm_report.ok
+        with contextlib.suppress(TelegramError):
+            await query.answer("✅ Done" if ok else "⚠️ Could not update the email")
+        # Drop the button so the same message cannot be confirmed twice.
+        with contextlib.suppress(TelegramError):
+            await query.edit_message_text(
+                f"{'✅' if ok else '⚠️'} {format_confirm(confirm_report)}",
+                disable_web_page_preview=True,
+            )
 
     # -- blocking work (runs in a worker thread) ----------------------------
 
-    def _run_blocking(self) -> str:
-        service = self._service_factory()
-        report = service.run(RedeemOptions())
-        return format_report(
-            report,
-            max_detail_lines=self._config.telegram.max_detail_lines,
-            show_urls=self._config.telegram.show_urls_in_dry_run,
-        )
+    def _run_blocking(self) -> RedeemReport:
+        return self._service_factory().run(RedeemOptions())
+
+    def _confirm_blocking(self, message_id: str) -> ConfirmReport:
+        return self._service_factory().confirm([message_id])
 
     def _status_blocking(self) -> StatusReport:
         return self._service_factory().status()
@@ -212,6 +318,7 @@ def build_application(
     application.add_handler(CommandHandler("help", bot.help))
     application.add_handler(CommandHandler("bidoo", bot.bidoo))
     application.add_handler(CommandHandler("status", bot.status))
+    application.add_handler(CallbackQueryHandler(bot.on_done, pattern=f"^{DONE_PREFIX}"))
     return application
 
 

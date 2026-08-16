@@ -8,6 +8,7 @@ Decision flow per email::
     already labelled processed?  -> ALREADY_PROCESSED
     parser finds no good link?   -> UNRECOGNIZED / AMBIGUOUS
     URL fails the allowlist?     -> REJECTED
+    strategy is manual?          -> MANUAL (handed to you; confirm() finishes it)
     dry run?                     -> DRY_RUN
     otherwise                    -> execute, then label the message
 """
@@ -15,7 +16,7 @@ Decision flow per email::
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -25,7 +26,14 @@ from bidoo_bot.errors import BidooBotError
 from bidoo_bot.logging_config import get_logger, redact_url, short_id
 from bidoo_bot.models.candidate import ActionCandidate, ParseStatus
 from bidoo_bot.models.email import EmailMessage
-from bidoo_bot.models.results import MessageResult, MessageStatus, RedeemReport, StatusReport
+from bidoo_bot.models.results import (
+    ConfirmReport,
+    ConfirmResult,
+    MessageResult,
+    MessageStatus,
+    RedeemReport,
+    StatusReport,
+)
 from bidoo_bot.parsing.action_parser import ActionParser
 from bidoo_bot.security import UrlPolicy
 
@@ -126,6 +134,7 @@ class RedeemService:
         report = RedeemReport(
             results=tuple(results),
             dry_run=dry_run,
+            strategy=self._config.redeem.strategy,
             query=query,
             started_at=started_at,
             duration_seconds=round(time.monotonic() - started_monotonic, 3),
@@ -139,6 +148,50 @@ class RedeemService:
             report.failed,
         )
         return report
+
+    def confirm(self, message_ids: Sequence[str]) -> ConfirmReport:
+        """Record that *you* opened these links yourself.
+
+        The counterpart of ``strategy: manual``: the bot cannot observe your
+        click, so nothing happens to a message until you say so. Each message
+        gets the processed label -- which is what makes the next run skip it --
+        and, when ``redeem.manual.on_confirm`` is ``trash``, is moved to the
+        provider's Trash.
+
+        Trash, never permanent deletion: it stays recoverable, and the OAuth
+        scope the bot holds could not delete it for good anyway.
+        """
+        settings = self._config.redeem.manual
+        label = self._config.gmail.processed_label
+        results: list[ConfirmResult] = []
+
+        for message_id in message_ids:
+            handle = short_id(message_id)
+            labels: tuple[str, ...] = ()
+            try:
+                if label:
+                    self._mailbox.add_label(message_id, label)
+                    labels = (label,)
+                if settings.trash_on_confirm:
+                    self._mailbox.trash(message_id)
+                    logger.info("Message %s confirmed and moved to Trash", handle)
+                else:
+                    logger.info("Message %s confirmed and labelled", handle)
+            except BidooBotError as exc:
+                logger.error("Could not confirm message %s: %s", handle, exc)
+                results.append(ConfirmResult(message_id=message_id, ok=False, detail=str(exc)))
+                continue
+            results.append(
+                ConfirmResult(
+                    message_id=message_id,
+                    ok=True,
+                    detail="moved to Trash" if settings.trash_on_confirm else "labelled",
+                    labels_applied=labels,
+                    trashed=settings.trash_on_confirm,
+                )
+            )
+
+        return ConfirmReport(results=tuple(results))
 
     def status(self) -> StatusReport:
         """Non-sensitive configuration snapshot plus a mailbox probe."""
@@ -192,6 +245,12 @@ class RedeemService:
         if not decision.allowed:
             logger.warning("Message %s -> REJECTED: %s", handle, decision.reason)
             return self._result(message, MessageStatus.REJECTED, decision.reason, candidate)
+
+        if self._config.redeem.is_manual:
+            # The link is validated but never opened: it is handed to you, and
+            # the mail is left untouched until confirm() is called.
+            logger.info("Message %s -> MANUAL: link handed over, nothing executed", handle)
+            return self._result(message, MessageStatus.MANUAL, "open this link yourself", candidate)
 
         if context.dry_run:
             logger.info("Message %s -> DRY RUN: action not executed", handle)

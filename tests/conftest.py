@@ -36,18 +36,27 @@ real_load_dotenv = dotenv.load_dotenv
 
 
 @pytest.fixture(autouse=True)
-def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Keep the developer's own environment out of the tests.
+def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+    """Keep the developer's working copy out of the tests.
 
-    Clearing the variables is not enough: ``load_secrets()`` also reads a
-    ``.env`` file, and a developer running the suite from a configured working
-    copy has a real Telegram token sitting right there. Neutralising the loader
-    is what actually guarantees the suite is hermetic -- without it a test can
-    end up making a live API call with a real credential.
+    Three separate leaks, all of which have actually bitten:
+
+    * environment variables -- cleared;
+    * ``.env`` -- ``load_secrets()`` reads one, and a developer running the
+      suite from a configured checkout has a real Telegram token sitting right
+      there. Neutralising the loader is what makes the suite hermetic; without
+      it a test made a live API call with a real credential;
+    * ``config.yaml`` -- ``load_config()`` falls back to the current directory,
+      so the developer's own strategy and query silently changed what the CLI
+      tests exercised. Running each test from an empty directory fixes that
+      for good.
+
+    Tests that need a config or a ``.env`` create one explicitly.
     """
     for name in _LEAKY_ENV:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(dotenv, "load_dotenv", lambda *_args, **_kwargs: False)
+    monkeypatch.chdir(tmp_path)
     clear_registered_secrets()
     yield
     clear_registered_secrets()

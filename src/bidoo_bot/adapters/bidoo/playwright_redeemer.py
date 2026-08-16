@@ -15,6 +15,8 @@ If the site presents a login page, the run simply fails with a clear message.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -224,11 +226,35 @@ def _short_error(exc: Exception) -> str:
     return first_line[:200]
 
 
-def open_login_browser(settings: PlaywrightSettings, url: str) -> None:
+def has_stored_session(user_data_dir: Path) -> bool:
+    """Whether the profile holds a cookie store of a plausible size.
+
+    Only the file's existence and size are looked at -- never its contents.
+    Enough to tell "you are signed in" from "nothing was saved", which is the
+    difference between a working setup and one that silently does nothing.
+    """
+    for candidate in (
+        user_data_dir / "Default" / "Cookies",
+        user_data_dir / "Default" / "Network" / "Cookies",
+    ):
+        if candidate.is_file() and candidate.stat().st_size > 4096:
+            return True
+    return False
+
+
+def open_login_browser(
+    settings: PlaywrightSettings,
+    url: str,
+    *,
+    on_ready: Callable[[], None] | None = None,
+) -> bool:
     """Open a visible browser on the persistent profile so you can log in.
 
-    Used by ``bidoo-bot browser-login``. The bot never types credentials: it
-    just opens the window and waits for you to close it.
+    Used by ``bidoo-bot browser-login``. The bot never types credentials and
+    never touches a CAPTCHA: it opens the window, waits for you to close it,
+    and later reuses whatever session you established by hand.
+
+    Returns whether the profile ends up holding a session.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -240,14 +266,27 @@ def open_login_browser(settings: PlaywrightSettings, url: str) -> None:
     with sync_playwright() as playwright:
         browser_type = getattr(playwright, settings.browser)
         context = browser_type.launch_persistent_context(
-            str(settings.user_data_dir), headless=False
+            str(settings.user_data_dir),
+            headless=False,
+            args=["--start-maximized"],
+            no_viewport=True,
         )
         page = context.pages[0] if context.pages else context.new_page()
+        # Without this the window can open *behind* the terminal on macOS,
+        # which looks exactly like "no browser opened".
+        with contextlib.suppress(Exception):
+            page.bring_to_front()
         page.goto(url, wait_until="load", timeout=settings.timeout_seconds * 1000)
+        with contextlib.suppress(Exception):
+            page.bring_to_front()
+        if on_ready is not None:
+            on_ready()
         try:
             page.wait_for_event("close", timeout=0)
         except Exception as exc:
             logger.debug("Login window closed (%s)", type(exc).__name__)
         finally:
             context.close()
-    logger.info("Session stored in %s", settings.user_data_dir)
+    stored = has_stored_session(settings.user_data_dir)
+    logger.info("Session %s in %s", "stored" if stored else "NOT stored", settings.user_data_dir)
+    return stored

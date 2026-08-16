@@ -42,6 +42,9 @@ class LazyMailbox:
     def add_label(self, message_id: str, label: str) -> None:
         self._target().add_label(message_id, label)
 
+    def trash(self, message_id: str) -> None:
+        self._target().trash(message_id)
+
     def check_connection(self) -> MailboxHealth:
         return self._target().check_connection()
 

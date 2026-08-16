@@ -23,6 +23,14 @@ class MessageStatus(StrEnum):
     DRY_RUN = "DRY_RUN"
     """A candidate was found and validated, but nothing was executed."""
 
+    MANUAL = "MANUAL"
+    """The validated link was handed to you to open yourself.
+
+    Used by ``redeem.strategy: manual``, where the site needs a session only
+    your own browser has. Nothing is executed and nothing is labelled until you
+    confirm.
+    """
+
     ALREADY_PROCESSED = "ALREADY_PROCESSED"
     """The message already carries the "processed" label."""
 
@@ -72,6 +80,9 @@ class RedeemReport:
 
     results: tuple[MessageResult, ...] = field(default_factory=tuple)
     dry_run: bool = False
+    strategy: str = ""
+    """Which redeem strategy produced this report; changes how it reads."""
+
     query: str = ""
     started_at: datetime | None = None
     duration_seconds: float = 0.0
@@ -102,6 +113,39 @@ class RedeemReport:
     def ok(self) -> bool:
         """True when nothing went wrong (candidates may still be unrecognized)."""
         return not self.errors and self.failed == 0
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmResult:
+    """Outcome of confirming that you opened one link yourself."""
+
+    message_id: str
+    ok: bool
+    detail: str = ""
+    labels_applied: tuple[str, ...] = field(default_factory=tuple)
+    trashed: bool = False
+    """Moved to Gmail's Trash. Recoverable; nothing is ever deleted for good."""
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmReport:
+    results: tuple[ConfirmResult, ...] = field(default_factory=tuple)
+
+    @property
+    def confirmed(self) -> int:
+        return sum(1 for r in self.results if r.ok)
+
+    @property
+    def failed(self) -> int:
+        return sum(1 for r in self.results if not r.ok)
+
+    @property
+    def trashed(self) -> int:
+        return sum(1 for r in self.results if r.trashed)
+
+    @property
+    def ok(self) -> bool:
+        return self.failed == 0
 
 
 @dataclass(frozen=True, slots=True)

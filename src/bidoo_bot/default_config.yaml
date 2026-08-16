@@ -172,6 +172,9 @@ parser:
 redeem:
   # "http" performs a plain, redirect-checked GET on the candidate URL.
   # "playwright" drives a persistent browser profile you logged into by hand.
+  # "manual" does not open anything: the bot validates the link and hands it
+  #   to you, and only touches the mail once you confirm you opened it. Use
+  #   this when the redeem needs a session that only your own browser has.
   # Start with "http": only switch if the site really needs a browser session.
   strategy: "http"
   # Safety default and the single source of truth for dry-run: the Telegram
@@ -181,6 +184,13 @@ redeem:
   dry_run: true
   # Pause between two redeem actions in the same run, to stay polite.
   delay_between_actions_seconds: 2.0
+
+  manual:
+    # What happens to an email once you confirm you opened its link.
+    # "trash" -> move it to Gmail's Trash (recoverable for 30 days)
+    # "label" -> only apply the processed label and keep the mail
+    # Nothing is ever deleted permanently: the OAuth scope cannot do it.
+    on_confirm: "trash"
 
   http:
     timeout_seconds: 20.0

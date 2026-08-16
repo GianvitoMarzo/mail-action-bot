@@ -152,6 +152,19 @@ class GmailMailbox:
         )
         logger.info("Applied label '%s' to message %s", label, short_id(message_id))
 
+    def trash(self, message_id: str) -> None:
+        """Move a message to Gmail's Trash.
+
+        ``messages.trash``, never ``messages.delete``: the mail stays
+        recoverable for 30 days, and the gmail.modify scope the bot holds
+        cannot permanently delete anything even if asked to.
+        """
+        self._call(
+            self._service.users().messages().trash(userId="me", id=message_id),
+            f"moving message {short_id(message_id)} to Trash",
+        )
+        logger.info("Moved message %s to Trash", short_id(message_id))
+
     def check_connection(self) -> MailboxHealth:
         profile = self._call(
             self._service.users().getProfile(userId="me"), "reading the Gmail profile"

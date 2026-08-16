@@ -459,3 +459,68 @@ def test_check_config_reports_defaults_when_there_is_no_config_file() -> None:
     _code, output = run(["check-config"])
 
     assert "(packaged defaults)" in output
+
+
+# ---------------------------------------------------------------------------
+# confirm (the CLI counterpart of the Telegram button)
+# ---------------------------------------------------------------------------
+
+
+def test_confirm_labels_and_trashes(wired: FakeMailbox) -> None:
+    wired.messages = [make_email("msg-1", html=GOOD_HTML)]
+
+    code, output = run(["confirm", "msg-1"])
+
+    assert code == cli.EXIT_OK
+    assert wired.labelled == [("msg-1", "Bidoo/Processed")]
+    assert wired.trashed == ["msg-1"]
+    assert "Trash" in output
+    assert "recoverable" in output
+
+
+def test_confirm_reports_failure_with_a_nonzero_exit(wired: FakeMailbox) -> None:
+    wired.messages = [make_email("msg-1", html=GOOD_HTML)]
+    wired.trash_error = "Gmail API error while moving to Trash"
+
+    code, output = run(["confirm", "msg-1"])
+
+    assert code == cli.EXIT_ERROR
+    assert "❌" in output
+
+
+def test_confirm_accepts_several_ids(wired: FakeMailbox) -> None:
+    wired.messages = [make_email(f"msg-{i}", html=GOOD_HTML) for i in range(3)]
+
+    code, _ = run(["confirm", "msg-0", "msg-1", "msg-2"])
+
+    assert code == cli.EXIT_OK
+    assert wired.trashed == ["msg-0", "msg-1", "msg-2"]
+
+
+def test_redeem_json_exposes_the_id_confirm_needs(wired: FakeMailbox) -> None:
+    """`--json` must give you something `confirm` can actually take."""
+    wired.messages = [make_email("msg-1", html=GOOD_HTML)]
+
+    _code, output = run(["redeem", "--json"])
+
+    payload = json.loads(output)
+    assert payload["results"][0]["message_id"] == "msg-1"
+    assert payload["results"][0]["message"] != "msg-1", "the short handle stays too"
+
+
+def test_a_config_yaml_in_the_working_directory_is_picked_up(tmp_path: Path) -> None:
+    """Documents the cwd fallback -- and proves the tests are isolated from it.
+
+    Regression: the suite used to run in the repository root, so the
+    developer's own config.yaml changed what these tests exercised.
+    """
+    import yaml
+
+    (Path.cwd() / "config.yaml").write_text(
+        yaml.safe_dump({"gmail": {"query": "label:FromCwd"}}), "utf-8"
+    )
+
+    code, output = run(["check-config"])
+
+    assert code == cli.EXIT_OK
+    assert "label:FromCwd" in output

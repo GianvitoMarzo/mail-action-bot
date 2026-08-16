@@ -342,3 +342,151 @@ def test_search_errors_are_expected_type(service: RedeemService, mailbox: FakeMa
 
     with pytest.raises(MailboxError):
         FakeMailbox(search_error="down").search("q", max_results=1)
+
+
+# ---------------------------------------------------------------------------
+# Manual mode: the bot hands the link over, you open it, then you confirm
+# ---------------------------------------------------------------------------
+
+
+def manual_config(config: AppConfig, *, on_confirm: str = "trash") -> AppConfig:
+    from bidoo_bot.config import ManualSettings
+
+    return replace(
+        config,
+        redeem=replace(
+            config.redeem,
+            strategy="manual",
+            manual=ManualSettings(on_confirm=on_confirm),
+        ),
+    )
+
+
+def test_manual_mode_hands_over_the_link_without_touching_anything(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    mailbox.messages = [make_email(html=GOOD_HTML)]
+    service = build_service(manual_config(config), mailbox, factory)
+
+    report = service.run()
+
+    result = report.results[0]
+    assert result.status is MessageStatus.MANUAL
+    assert result.candidate is not None
+    assert result.candidate.url.startswith("https://www.bidoo.com/")
+    assert factory.builds == 0, "manual mode must never build a redeemer"
+    assert mailbox.labelled == [], "nothing is labelled until you confirm"
+    assert mailbox.trashed == [], "nothing is trashed until you confirm"
+
+
+def test_manual_mode_still_enforces_the_allowlist(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    """You must never be handed a link the policy would refuse."""
+    mailbox.messages = [make_email(html=OFFSITE_HTML)]
+    service = build_service(manual_config(config), mailbox, factory)
+
+    report = service.run()
+
+    assert report.results[0].status is MessageStatus.REJECTED
+    assert report.results[0].candidate is not None
+
+
+def test_manual_mode_still_refuses_unrecognised_email(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    mailbox.messages = [make_email(html=BORING_HTML)]
+    service = build_service(manual_config(config), mailbox, factory)
+
+    assert service.run().results[0].status is MessageStatus.UNRECOGNIZED
+
+
+def test_manual_mode_ignores_dry_run(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    """There is nothing to dry-run when the bot never performs the action."""
+    mailbox.messages = [make_email(html=GOOD_HTML)]
+    service = build_service(manual_config(config), mailbox, factory)
+
+    for dry_run in (True, False):
+        report = service.run(RedeemOptions(dry_run=dry_run))
+        assert report.results[0].status is MessageStatus.MANUAL
+
+
+def test_confirm_labels_and_trashes(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    mailbox.messages = [make_email(html=GOOD_HTML)]
+    service = build_service(manual_config(config), mailbox, factory)
+
+    report = service.confirm(["msg-1"])
+
+    assert report.ok
+    assert report.confirmed == 1
+    assert report.trashed == 1
+    assert mailbox.labelled == [("msg-1", "Bidoo/Processed")]
+    assert mailbox.trashed == ["msg-1"]
+
+
+def test_confirm_can_keep_the_email(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    mailbox.messages = [make_email(html=GOOD_HTML)]
+    service = build_service(manual_config(config, on_confirm="label"), mailbox, factory)
+
+    report = service.confirm(["msg-1"])
+
+    assert report.confirmed == 1
+    assert report.trashed == 0
+    assert mailbox.labelled == [("msg-1", "Bidoo/Processed")]
+    assert mailbox.trashed == [], "on_confirm: label must leave the mail alone"
+
+
+def test_confirm_makes_the_next_run_skip_the_email(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    """Confirming is what provides idempotency in manual mode."""
+    mailbox.messages = [make_email(html=GOOD_HTML)]
+    service = build_service(manual_config(config, on_confirm="label"), mailbox, factory)
+
+    assert service.run().results[0].status is MessageStatus.MANUAL
+    service.confirm(["msg-1"])
+
+    assert service.run().results[0].status is MessageStatus.ALREADY_PROCESSED
+
+
+def test_confirm_reports_a_failure_without_raising(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    mailbox.messages = [make_email(html=GOOD_HTML)]
+    mailbox.trash_error = "Gmail API error while moving to Trash"
+    service = build_service(manual_config(config), mailbox, factory)
+
+    report = service.confirm(["msg-1"])
+
+    assert not report.ok
+    assert report.failed == 1
+    assert "Trash" in report.results[0].detail
+
+
+def test_confirm_handles_several_messages(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    mailbox.messages = [make_email(f"msg-{i}", html=GOOD_HTML) for i in range(3)]
+    service = build_service(manual_config(config), mailbox, factory)
+
+    report = service.confirm(["msg-0", "msg-1", "msg-2"])
+
+    assert report.confirmed == 3
+    assert mailbox.trashed == ["msg-0", "msg-1", "msg-2"]
+
+
+def test_confirm_with_no_ids_is_a_no_op(
+    config: AppConfig, mailbox: FakeMailbox, factory: CountingFactory
+) -> None:
+    service = build_service(manual_config(config), mailbox, factory)
+
+    report = service.confirm([])
+
+    assert report.results == ()
+    assert mailbox.trashed == []

@@ -376,3 +376,136 @@ def test_the_token_is_registered_for_redaction(monkeypatch: pytest.MonkeyPatch) 
     bot_module.fetch_recent_user_ids(token)
 
     assert token not in redact(f"using {token}")
+
+
+# ---------------------------------------------------------------------------
+# Manual mode: links with a confirmation button
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StubCallbackQuery:
+    data: str
+    answers: list[tuple[str, bool]] = field(default_factory=list)
+    edits: list[str] = field(default_factory=list)
+
+    async def answer(self, text: str = "", show_alert: bool = False) -> None:
+        self.answers.append((text, show_alert))
+
+    async def edit_message_text(self, text: str, **_kwargs: Any) -> None:
+        self.edits.append(text)
+
+
+@dataclass
+class StubCallbackUpdate:
+    effective_user: StubUser | None
+    callback_query: StubCallbackQuery = field(
+        default_factory=lambda: StubCallbackQuery(data="done:msg-1")
+    )
+
+
+def manual_bot_config(config: AppConfig) -> AppConfig:
+    from dataclasses import replace as dc_replace
+
+    from bidoo_bot.config import ManualSettings
+
+    return dc_replace(
+        config,
+        redeem=dc_replace(
+            config.redeem, strategy="manual", manual=ManualSettings(on_confirm="trash")
+        ),
+    )
+
+
+def manual_service(config: AppConfig, mailbox: FakeMailbox) -> RedeemService:
+    from bidoo_bot.application.redeem import RedeemService as Service
+    from bidoo_bot.parsing.action_parser import ActionParser
+    from bidoo_bot.security import UrlPolicy
+    from tests.fakes import CountingFactory
+
+    return Service(
+        config=config,
+        mailbox=mailbox,
+        parser=ActionParser(config.parser),
+        policy=UrlPolicy(config.security),
+        redeemer_factory=CountingFactory(redeemer=None),  # type: ignore[arg-type]
+        sleep=lambda _s: None,
+    )
+
+
+async def test_bidoo_sends_one_link_message_per_email(
+    config: AppConfig, mailbox: FakeMailbox
+) -> None:
+    manual_cfg = manual_bot_config(config)
+    mailbox.messages = [make_email("msg-1", html=GOOD_HTML), make_email("msg-2", html=GOOD_HTML)]
+    bot = make_bot(manual_cfg, manual_service(manual_cfg, mailbox))
+    update = StubUpdate(effective_user=StubUser(OWNER))
+
+    await invoke(bot.bidoo, update)
+
+    # ack + summary + one message per link
+    assert len(update.replies) == 4
+    links = [r for r in update.replies if "https://www.bidoo.com/" in r]
+    assert len(links) == 2
+    assert "Open it, then confirm below." in links[0]
+    assert mailbox.trashed == [], "nothing is touched before you confirm"
+
+
+async def test_the_done_button_confirms_and_trashes(
+    config: AppConfig, mailbox: FakeMailbox
+) -> None:
+    manual_cfg = manual_bot_config(config)
+    mailbox.messages = [make_email("msg-1", html=GOOD_HTML)]
+    bot = make_bot(manual_cfg, manual_service(manual_cfg, mailbox))
+    update = StubCallbackUpdate(effective_user=StubUser(OWNER))
+
+    await invoke(bot.on_done, update)
+
+    assert mailbox.labelled == [("msg-1", "Bidoo/Processed")]
+    assert mailbox.trashed == ["msg-1"]
+    assert update.callback_query.answers[0][0] == "✅ Done"
+    # The keyboard is replaced so the same mail cannot be confirmed twice.
+    assert update.callback_query.edits
+    assert "Trash" in update.callback_query.edits[0]
+
+
+async def test_a_stranger_pressing_the_button_is_refused(
+    config: AppConfig, mailbox: FakeMailbox
+) -> None:
+    """A callback carries a user id and must be gated like any command."""
+    manual_cfg = manual_bot_config(config)
+    mailbox.messages = [make_email("msg-1", html=GOOD_HTML)]
+    bot = make_bot(manual_cfg, manual_service(manual_cfg, mailbox))
+    update = StubCallbackUpdate(effective_user=StubUser(STRANGER))
+
+    await invoke(bot.on_done, update)
+
+    assert mailbox.trashed == [], "an unauthorised press must change nothing"
+    assert mailbox.labelled == []
+    assert update.callback_query.answers == [(ACCESS_DENIED_MESSAGE, True)]
+
+
+async def test_a_failing_confirmation_is_reported_on_the_button(
+    config: AppConfig, mailbox: FakeMailbox
+) -> None:
+    manual_cfg = manual_bot_config(config)
+    mailbox.messages = [make_email("msg-1", html=GOOD_HTML)]
+    mailbox.trash_error = "Gmail API error while moving to Trash"
+    bot = make_bot(manual_cfg, manual_service(manual_cfg, mailbox))
+    update = StubCallbackUpdate(effective_user=StubUser(OWNER))
+
+    await invoke(bot.on_done, update)
+
+    assert "⚠️" in update.callback_query.answers[0][0]
+
+
+async def test_no_link_messages_when_the_strategy_is_not_manual(
+    config: AppConfig, service: RedeemService, mailbox: FakeMailbox
+) -> None:
+    mailbox.messages = [make_email(html=GOOD_HTML)]
+    bot = make_bot(config, service)
+    update = StubUpdate(effective_user=StubUser(OWNER))
+
+    await invoke(bot.bidoo, update)
+
+    assert len(update.replies) == 2, "ack + summary only"

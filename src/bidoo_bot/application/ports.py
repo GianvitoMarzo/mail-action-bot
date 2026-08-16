@@ -34,6 +34,16 @@ class MailboxPort(Protocol):
         """Apply ``label`` to a message, creating the label if needed."""
         ...
 
+    def trash(self, message_id: str) -> None:
+        """Move a message to the provider's Trash.
+
+        Recoverable by design. There is deliberately no permanent-delete
+        operation anywhere in this project: the narrow OAuth scope the bot
+        asks for cannot perform one, and losing mail must never be the cost
+        of a bug here.
+        """
+        ...
+
     def check_connection(self) -> MailboxHealth:
         """Cheap connectivity/credentials probe for ``/status``."""
         ...

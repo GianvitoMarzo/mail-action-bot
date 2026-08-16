@@ -29,8 +29,11 @@ class FakeMailbox:
     exclude_processed: bool = False
     processed_label: str = "Bidoo/Processed"
 
+    trash_error: str | None = None
+
     searches: list[tuple[str, int]] = field(default_factory=list)
     labelled: list[tuple[str, str]] = field(default_factory=list)
+    trashed: list[str] = field(default_factory=list)
 
     def search(self, query: str, *, max_results: int) -> Sequence[EmailMessage]:
         self.searches.append((query, max_results))
@@ -49,6 +52,12 @@ class FakeMailbox:
         for index, message in enumerate(self.messages):
             if message.id == message_id and label not in message.labels:
                 self.messages[index] = replace(message, labels=(*message.labels, label))
+
+    def trash(self, message_id: str) -> None:
+        if self.trash_error:
+            raise MailboxError(self.trash_error)
+        self.trashed.append(message_id)
+        self.messages = [m for m in self.messages if m.id != message_id]
 
     def check_connection(self) -> MailboxHealth:
         if not self.connected:
