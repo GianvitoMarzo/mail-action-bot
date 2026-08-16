@@ -50,6 +50,14 @@ user-data-dir*/
 .state/
 .cache/
 
+# Saved emails. These are personal mail: subjects, addresses, tracking links
+# that identify you. The synthetic test fixtures are the only exception.
+*.eml
+*.mbox
+*.msg
+*.mime
+!tests/fixtures/*.eml
+
 # Runtime artifacts
 screenshots/
 *.har

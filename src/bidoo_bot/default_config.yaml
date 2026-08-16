@@ -90,6 +90,20 @@ parser:
       field: text
       pattern: '\b(regalo|omaggio|bonus|premio|gift|reward)\b'
       weight: 0.30
+    # The offer is often a *quantity* of bids rather than the word "gratis":
+    # "Riscatta 2 Puntate", "Prendi 5 🎁", "Sblocca 3 Puntate".
+    # Kept below the threshold on its own (0.40 + bidoo-domain = 0.64) so a
+    # bare count still needs corroboration from a verb or the gift marker.
+    - name: free-bid-count
+      field: text
+      pattern: '\d+\s*(?:🎁\s*)?(?:puntat\w*|bids?|credit\w*)\b|\d+\s*🎁'
+      weight: 0.40
+    # Senders use 🎁 as shorthand for the free bid itself. Separate from
+    # gift-word because \b cannot delimit an emoji.
+    - name: gift-emoji
+      field: text
+      pattern: '🎁'
+      weight: 0.30
 
     # -- href -----------------------------------------------------------
     - name: bidoo-domain

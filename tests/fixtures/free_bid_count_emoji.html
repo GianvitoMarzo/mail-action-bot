@@ -1,0 +1,38 @@
+<!--
+  FICTIONAL fixture, but modelled on the shape of a real newsletter:
+
+  * the offer is a *quantity* of bids ("3 Puntate"), never the word "gratis";
+  * the gift emoji stands in for the word "free";
+  * the call to action and the unsubscribe link share the same tracking host,
+    the same path and the same query parameter names, so the URL carries no
+    signal at all -- only the link text distinguishes them;
+  * the unsubscribe paragraph also mentions "puntate", which is why the
+    scoring rules for this shape must look at the link text and not at the
+    surrounding context.
+
+  All identifiers below are invented.
+-->
+<html>
+  <body>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center">
+          <p>Tutti i top prodotti sono in asta in tripla chance 🍀</p>
+          <a href="https://elink.bidoo.example-test.invalid/vtrack?clientid=0000&amp;ml=00&amp;ul=00"
+             style="color:#ffffff;text-decoration:none;">🔓 Sblocca 3 Puntate 🎁</a>
+          <p>Tre possibilità per provarci. Una sola per vincere.</p>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <p style="font-size:11px">
+            Se non vuoi mai più ricevere email da parte nostra e quindi neanche
+            puntate, clicca su questo link
+            <a href="https://elink.bidoo.example-test.invalid/vtrack?clientid=0000&amp;ml=01&amp;ul=00"
+               style="color:#1a0dab; text-decoration:underline;">disiscriviti</a>
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

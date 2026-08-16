@@ -355,3 +355,43 @@ def test_bot_error_without_an_allowlist_points_at_whoami(
 
     assert code == cli.EXIT_ERROR
     assert "telegram-whoami" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# check-config: pinned scoring rules
+# ---------------------------------------------------------------------------
+
+
+def test_check_config_flags_a_config_that_pins_the_rules(tmp_path: Path) -> None:
+    """A config.yaml copied wholesale freezes the rule set; say so."""
+    import yaml
+
+    from bidoo_bot.config import default_config_dict
+
+    data = default_config_dict()
+    data["parser"]["signals"] = data["parser"]["signals"][:3]
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.safe_dump(data), "utf-8")
+
+    _code, output = run(["--config", str(config_file), "check-config"])
+
+    assert "pinned by your config.yaml" in output
+    assert "delete the parser.signals block" in output
+
+
+def test_check_config_is_quiet_for_a_minimal_config(tmp_path: Path) -> None:
+    import yaml
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.safe_dump({"gmail": {"query": "label:Bidoo"}}), "utf-8")
+
+    _code, output = run(["--config", str(config_file), "check-config"])
+
+    assert "packaged defaults" in output
+    assert "pinned" not in output
+
+
+def test_check_config_reports_defaults_when_there_is_no_config_file() -> None:
+    _code, output = run(["check-config"])
+
+    assert "(packaged defaults)" in output

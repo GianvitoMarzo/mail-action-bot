@@ -174,9 +174,23 @@ cp .env.example .env
 from parent folders, so an unrelated project's `.env` can never hand this tool
 a token. Point somewhere else with `BIDOO_CONFIG` for the config file.
 
-`config.example.yaml` is a full copy of the built-in defaults, so you can
-delete every key you do not want to change — whatever you leave out keeps its
-default value. Validate at any time:
+`config.example.yaml` is a full copy of the built-in defaults, so **delete
+every key you are not actually changing**. Whatever you leave out keeps its
+default value *and keeps following future improvements to it*. A typical
+`config.yaml` is a handful of lines:
+
+```yaml
+gmail:
+  query: "label:Bidoo newer_than:15d"
+security:
+  allowed_domains: ["bidoo.com", "bidoo.it"]
+```
+
+This matters most for `parser.signals`: **lists are replaced, not merged**, so
+a wholesale copy freezes the scoring rules and new default rules will silently
+never reach you. `check-config` tells you when that has happened.
+
+Validate at any time:
 
 ```bash
 python -m bidoo_bot check-config
@@ -311,6 +325,7 @@ point, not the truth.
    | `LOW_CONFIDENCE` | add a signal matching the real button wording, or lower `parser.min_confidence` |
    | `AMBIGUOUS` | add a signal that distinguishes them, or lower `parser.ambiguity_margin` |
    | the wrong link wins | add a `kind: negative` signal for it |
+   | a new default rule seems to do nothing | your `config.yaml` pins `parser.signals`; `check-config` says so — delete the block |
 
 4. Re-run `analyze-email` until it says what you expect, then do a real
    dry run against Gmail:
@@ -490,7 +505,7 @@ pip install -e ".[dev]"
 ruff format .           # format
 ruff check .            # lint
 mypy                    # type check (strict on src/)
-pytest                  # 263 tests, no network, no credentials
+pytest                  # 276 tests, no network, no credentials
 ```
 
 Every test runs against the packaged defaults and uses in-memory fakes for
@@ -517,7 +532,14 @@ Gmail search box to check. Remember the bot appends
 `python -m bidoo_bot check-config` prints the effective query.
 
 **`⚠️ Unrecognized`** — run `analyze-email` on that mail and follow
-[Configuring for your actual emails](#configuring-for-your-actual-emails).
+[Configuring for your actual emails](#configuring-for-your-actual-emails). Some
+senders never write "gratis" and express the offer as a quantity instead
+("Sblocca 3 Puntate 🎁"); the `free-bid-count` and `gift-emoji` default rules
+cover that shape.
+
+**A new default scoring rule has no effect** — your `config.yaml` is pinning
+the whole `parser.signals` list. Run `check-config`: it reports `pinned by your
+config.yaml` and how many rules the defaults now ship.
 
 **`⛔ Rejected`** — the winning link is not on your allowlist. This is the
 system working. Check the host with `analyze-email` and add it *only* if you

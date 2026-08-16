@@ -281,3 +281,88 @@ def test_extract_links_collects_attributes_and_context() -> None:
     assert "btn" in links[0].attrs
     assert "data-track" in links[0].attrs
     assert "puntata gratis" in links[0].context
+
+
+# ---------------------------------------------------------------------------
+# Offers expressed as a quantity of bids ("3 Puntate 🎁") rather than "gratis"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label",
+    [
+        "🔓 Sblocca 3 Puntate 🎁",
+        "Riscatta 2 Puntate 🎁",
+        "Prendi 5 🎁 e vinci 💰",
+        "Ritira le tue 10 puntate 🎁",
+        "Claim your 3 bids 🎁",
+    ],
+)
+def test_a_quantity_of_bids_is_recognised(parser: ActionParser, label: str) -> None:
+    """Regression: "Sblocca 3 Puntate 🎁" used to score 0.55 and be refused."""
+    html = (
+        "<html><body><p>Le aste di oggi.</p>"
+        f'<a href="https://elink.bidoo.com/vtrack?clientid=0000">{label}</a>'
+        "</body></html>"
+    )
+
+    result = parser.parse(html)
+
+    assert result.status is ParseStatus.OK, f"{label!r} was refused"
+    assert result.best is not None
+    assert result.best.confidence >= 0.65
+
+
+def test_count_and_emoji_beat_the_unsubscribe_sharing_the_same_url_shape(
+    parser: ActionParser,
+) -> None:
+    result = parse_fixture(parser, "free_bid_count_emoji.html")
+
+    assert result.status is ParseStatus.OK
+    assert result.best is not None
+    assert "Sblocca 3 Puntate" in result.best.text
+    # The fixture host is fictional, so bidoo-domain does not fire: this is the
+    # text signals clearing the threshold entirely on their own.
+    assert result.best.confidence >= 0.65
+    assert "bidoo-domain" not in result.best.signals
+    unsubscribe = next(c for c in result.candidates if c.text == "disiscriviti")
+    assert unsubscribe.confidence < 0.1
+
+
+def test_the_unsubscribe_context_mentioning_bids_does_not_lift_it(
+    parser: ActionParser,
+) -> None:
+    """The footer says "...e quindi neanche puntate": a context rule would fire."""
+    result = parse_fixture(parser, "free_bid_count_emoji.html")
+
+    unsubscribe = next(c for c in result.candidates if c.text == "disiscriviti")
+    assert "free-bid-count" not in unsubscribe.signals
+    assert "gift-emoji" not in unsubscribe.signals
+
+
+def test_a_bare_count_is_not_enough_on_its_own(parser: ActionParser) -> None:
+    """0.40 + bidoo-domain = 0.64, just under the threshold: needs corroboration."""
+    html = (
+        '<html><body><a href="https://www.bidoo.com/storico">Hai usato 3 puntate</a></body></html>'
+    )
+
+    result = parser.parse(html)
+
+    assert result.status is ParseStatus.LOW_CONFIDENCE
+    assert result.candidates[0].confidence < 0.65
+
+
+def test_the_gift_emoji_alone_is_not_enough(parser: ActionParser) -> None:
+    html = '<html><body><a href="https://www.bidoo.com/aste">Le aste 🎁</a></body></html>'
+
+    result = parser.parse(html)
+
+    assert result.status is ParseStatus.LOW_CONFIDENCE
+
+
+def test_a_plain_number_without_the_bid_noun_does_not_match(parser: ActionParser) -> None:
+    html = '<html><body><a href="https://www.bidoo.com/aste">Vedi le 200 aste</a></body></html>'
+
+    result = parser.parse(html)
+
+    assert "free-bid-count" not in result.candidates[0].signals

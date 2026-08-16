@@ -13,12 +13,22 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TextIO
 
+import yaml
+
 from bidoo_bot import __version__
 from bidoo_bot.application.redeem import RedeemOptions
-from bidoo_bot.config import AppConfig, dry_run_from_env, load_config, load_secrets
+from bidoo_bot.config import (
+    AppConfig,
+    build_config,
+    default_config_dict,
+    dry_run_from_env,
+    load_config,
+    load_secrets,
+)
 from bidoo_bot.container import build_service, build_service_factory
 from bidoo_bot.errors import BidooBotError, ConfigError
 from bidoo_bot.logging_config import configure_logging, get_logger
@@ -316,6 +326,31 @@ def cmd_browser_login(args: argparse.Namespace, config: AppConfig, out: TextIO) 
     return EXIT_OK
 
 
+def _signals_note(config: AppConfig) -> str:
+    """Warn when the user's config pins the scoring rules.
+
+    Lists are replaced, not merged, so a config.yaml copied wholesale from
+    config.example.yaml freezes the rule set: improved default rules would
+    never reach it, silently. Worth saying out loud rather than leaving people
+    to wonder why a new signal does nothing.
+    """
+    if config.source_path is None:
+        return " (packaged defaults)"
+    try:
+        raw = yaml.safe_load(config.source_path.read_text("utf-8")) or {}
+    except (OSError, yaml.YAMLError):  # pragma: no cover - already validated
+        return ""
+    if not isinstance(raw, Mapping) or "signals" not in (raw.get("parser") or {}):
+        return " (packaged defaults)"
+    packaged = len(build_config(default_config_dict()).parser.signals)
+    if len(config.parser.signals) == packaged:
+        return " (pinned by your config.yaml)"
+    return (
+        f" (pinned by your config.yaml; the packaged defaults now ship {packaged}"
+        " — delete the parser.signals block to follow them)"
+    )
+
+
 def cmd_check_config(_args: argparse.Namespace, config: AppConfig, out: TextIO) -> int:
     out.write(f"Config OK: {config.source_path or '(packaged defaults)'}\n")
     out.write(f"  query:            {config.gmail.effective_query()}\n")
@@ -325,7 +360,7 @@ def cmd_check_config(_args: argparse.Namespace, config: AppConfig, out: TextIO) 
     out.write(f"  strategy:         {config.redeem.strategy}\n")
     out.write(f"  dry run:          {config.redeem.dry_run}\n")
     out.write(f"  min confidence:   {config.parser.min_confidence}\n")
-    out.write(f"  parser signals:   {len(config.parser.signals)}\n")
+    out.write(f"  parser signals:   {len(config.parser.signals)}{_signals_note(config)}\n")
     out.write(f"  credentials file: {config.resolve(config.gmail.credentials_file)}\n")
     out.write(f"  token file:       {config.resolve(config.gmail.token_file)}\n")
     return EXIT_OK
