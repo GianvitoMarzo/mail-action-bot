@@ -1,0 +1,111 @@
+# ---------------------------------------------------------------------------
+# SECRETS AND CREDENTIALS -- keep this section aggressive.
+# Nothing in here must ever reach the repository.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+secrets/
+secret/
+credentials/
+.credentials/
+.secrets/
+
+# Google / Gmail OAuth
+client_secret*.json
+client_secrets*.json
+*credentials*.json
+*client-secret*.json
+token.json
+*token*.json
+*_token
+*.token
+.gmail/
+.google/
+
+# Generic credential material
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+id_rsa*
+id_ed25519*
+*.crt
+!**/tests/fixtures/*.crt
+
+# Cookies / sessions / browser profiles
+cookies.txt
+cookies*.json
+*.cookies
+storage_state*.json
+session*.json
+.playwright/
+playwright-profile/
+browser-profile*/
+user-data-dir*/
+.local/
+.state/
+.cache/
+
+# Runtime artifacts
+screenshots/
+*.har
+config.yaml
+config.yml
+!config.example.yaml
+*.local.yaml
+*.local.yml
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.hypothesis/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

@@ -1,0 +1,32 @@
+From: Bidoo <noreply@example-bidoo.invalid>
+To: user@example.invalid
+Subject: =?utf-8?B?TGEgdHVhIHB1bnRhdGEgZ3JhdGlzIHRpIGFzcGV0dGE=?=
+Date: Mon, 3 Mar 2025 09:15:00 +0100
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=_Part_42_1234567"
+
+------=_Part_42_1234567
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hai una puntata gratis!
+Riscattala qui: https://www.bidoo.com/promo/riscuoti?token=EMLTOKEN123
+
+Per disiscriverti: https://newsletter.example.invalid/u/1
+
+------=_Part_42_1234567
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<html><body>
+<p>Hai una <b>puntata gratis</b> in attesa.</p>
+<p style="text-align:center">
+  <a class="btn" href="https://www.bidoo.com/promo/riscuoti?token=EMLTOKEN123"
+     style="background-color:#e94f37;color:#fff;padding:12px 24px;">Riscuoti ora</a>
+</p>
+<p style="font-size:11px">
+  <a href="https://newsletter.example.invalid/u/1">Disiscriviti</a>
+</p>
+</body></html>
+
+------=_Part_42_1234567--

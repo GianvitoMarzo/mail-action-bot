@@ -1,0 +1,209 @@
+# Built-in defaults for bidoo-bot.
+#
+# This file ships inside the package. A user `config.yaml` is deep-merged on
+# top of it, so your own config only needs the keys you actually change.
+# `config.example.yaml` at the repository root is the annotated copy of this
+# file -- keep the two in sync (tests/test_config.py enforces it).
+
+gmail:
+  # Gmail search query. Keep it narrow: the bot must never scan the whole
+  # mailbox. Anything the Gmail search box accepts works here.
+  query: "label:Bidoo newer_than:30d"
+  max_results: 25
+  # Label applied after a successful redeem. This is also the idempotency
+  # store: a labelled message is never processed twice.
+  processed_label: "Bidoo/Processed"
+  # Label applied when the action was attempted and failed. Set to null to
+  # disable.
+  failed_label: "Bidoo/Failed"
+  # When true, `-label:"<processed_label>"` is appended to the query so already
+  # redeemed mails are not even fetched.
+  exclude_processed_in_query: true
+  # OAuth client downloaded from Google Cloud Console (never commit it).
+  credentials_file: "secrets/google_client_secret.json"
+  # Where the OAuth token is cached after the first login (never commit it).
+  token_file: "secrets/gmail_token.json"
+
+security:
+  # Hard allowlist. A candidate link pointing anywhere else is REJECTED and
+  # nothing is executed. Add the tracking/redirect domain your mails actually
+  # use -- check it first with `bidoo-bot analyze-email`.
+  allowed_domains:
+    - "bidoo.com"
+    - "bidoo.it"
+  # Also accept subdomains of the entries above (www., click., email., ...).
+  allow_subdomains: true
+  # Refuse plain http:// links.
+  require_https: true
+  # Redirects are followed one hop at a time and every hop is re-checked
+  # against the allowlist.
+  max_redirects: 5
+
+parser:
+  # A candidate below this confidence is never executed -> UNRECOGNIZED.
+  min_confidence: 0.65
+  # If the two best *distinct* URLs are closer than this, refuse to guess
+  # -> AMBIGUOUS.
+  ambiguity_margin: 0.10
+  # Safety valve for absurdly large emails.
+  max_links: 300
+  # How much surrounding text is considered as "context" for each link.
+  context_chars: 200
+  case_sensitive: false
+
+  # Scoring rules. Every rule that matches contributes its weight; weights are
+  # combined with a noisy-OR (1 - product of (1 - w)) so several weak hints add
+  # up but never overflow. Negative rules multiply the result by (1 - weight).
+  #
+  #   field: text   -> the visible link text (or image alt / aria-label)
+  #          url    -> the href
+  #          attrs  -> class/id/role/data-* and the wrapped <img> attributes
+  #          context -> nearby text around the link
+  #          any    -> text + url + attrs, i.e. the link itself. It does NOT
+  #                    include the context: in a short email every link shares
+  #                    the same surroundings, so an "unsubscribe" in the footer
+  #                    would otherwise penalise the real button too.
+  #   kind:  positive (default) | negative
+  signals:
+    # -- link text ------------------------------------------------------
+    - name: redeem-verb-it
+      field: text
+      pattern: '\b(riscuot\w*|riscatt\w*|ritira\w*|ottieni|reclama)\b'
+      weight: 0.70
+    - name: redeem-verb-en
+      field: text
+      pattern: '\b(redeem|claim|collect|activate|unlock)\b'
+      weight: 0.60
+    - name: action-verb-weak
+      field: text
+      pattern: '\b(prendi|attiva|sblocca|usa|vai|get|grab|take|start)\b'
+      weight: 0.25
+    - name: free-bid-it
+      field: text
+      pattern: '(punt\w*|bid\w*|credit\w*)[^\n]{0,25}(gratis|gratuit\w*|omaggio)'
+      weight: 0.75
+    - name: free-bid-en
+      field: text
+      pattern: 'free[^\n]{0,25}(bid|credit|token)s?'
+      weight: 0.70
+    - name: gift-word
+      field: text
+      pattern: '\b(regalo|omaggio|bonus|premio|gift|reward)\b'
+      weight: 0.30
+
+    # -- href -----------------------------------------------------------
+    - name: bidoo-domain
+      field: url
+      pattern: '^https?://([a-z0-9-]+\.)*bidoo\.[a-z.]+(/|$)'
+      weight: 0.40
+    - name: redeem-path
+      field: url
+      pattern: '/[^/?#]*(riscuoti|riscatta|redeem|claim|freebid|free-bid|puntat|bonus|promo|coupon|gift)'
+      weight: 0.50
+    - name: redeem-query
+      field: url
+      pattern: '[?&][a-z_]*(action|cmd|do|type|op)=[^&]*(redeem|claim|riscuot|riscatt|bid)'
+      weight: 0.50
+    - name: token-query
+      field: url
+      pattern: '[?&][a-z_]*(token|code|hash|key|uid|id)=[A-Za-z0-9_-]{8,}'
+      weight: 0.25
+
+    # -- attributes and surrounding markup ------------------------------
+    - name: button-attrs
+      field: attrs
+      pattern: '\b(btn|button|cta|call-to-action|action-link|primary-link)\b'
+      weight: 0.30
+    - name: context-free-bid
+      field: context
+      pattern: '(punt\w*|bid\w*|credit\w*)[^\n]{0,30}(gratis|gratuit\w*|free)'
+      weight: 0.35
+    - name: context-redeem
+      field: context
+      pattern: '(riscuot\w*|riscatt\w*|redeem|claim)'
+      weight: 0.25
+
+    # -- negative rules -------------------------------------------------
+    - name: unsubscribe
+      field: any
+      kind: negative
+      pattern: '(unsubscribe|disiscriv\w*|(annulla|cancella)[^\n]{0,20}iscrizione|opt-?out|no[_-]?mail)'
+      weight: 0.95
+    - name: legal-or-preferences
+      field: any
+      kind: negative
+      pattern: '(privacy|termini|terms|condizioni|conditions|preferenz\w*|preferences|cookie|informativa|regolamento|disclaimer)'
+      weight: 0.85
+    - name: social-network
+      field: url
+      kind: negative
+      pattern: '//([a-z0-9-]+\.)*(facebook|instagram|twitter|x|youtube|tiktok|linkedin|whatsapp|telegram|t)\.(com|me|co|it)(/|$)'
+      weight: 0.90
+    - name: app-store
+      field: url
+      kind: negative
+      pattern: '(itunes\.apple|apps\.apple|play\.google|microsoft\.com/store)'
+      weight: 0.90
+    - name: browser-view
+      field: any
+      kind: negative
+      pattern: '((visualizza|leggi)[^\n]{0,20}browser|view[^\n]{0,20}browser|web ?version|versione web)'
+      weight: 0.80
+    - name: account-management
+      field: text
+      kind: negative
+      pattern: '\b(login|accedi|registrati|password|profilo|assistenza|support|contattaci|contact)\b'
+      weight: 0.50
+
+redeem:
+  # "http" performs a plain, redirect-checked GET on the candidate URL.
+  # "playwright" drives a persistent browser profile you logged into by hand.
+  # Start with "http": only switch if the site really needs a browser session.
+  strategy: "http"
+  # Safety default. Nothing is ever executed until you flip this to false
+  # (or pass --no-dry-run / set BIDOO_DRY_RUN=0).
+  dry_run: true
+  # Pause between two redeem actions in the same run, to stay polite.
+  delay_between_actions_seconds: 2.0
+
+  http:
+    timeout_seconds: 20.0
+    verify_tls: true
+    user_agent: "bidoo-bot/0.1 (+https://github.com/OWNER/bidoo-bot)"
+    accept_language: "it-IT,it;q=0.9,en;q=0.8"
+    # Regexes checked against the final response body. When the list is not
+    # empty at least one must match for the redeem to count as successful.
+    success_patterns: []
+    # Regexes that mark an explicit failure even on HTTP 200.
+    failure_patterns:
+      - '(sessione scaduta|session expired|effettua il login|please log in)'
+
+  playwright:
+    browser: "chromium"
+    headless: true
+    # Persistent profile directory holding the session you created manually.
+    # Must stay outside the repository (.local/ is git-ignored).
+    user_data_dir: ".local/playwright-profile"
+    timeout_seconds: 45.0
+    wait_until: "load"
+    # Extra wait after load, for pages that finish the redeem in JS.
+    settle_seconds: 2.0
+    # Same semantics as the http block, checked against the rendered page text.
+    success_patterns: []
+    failure_patterns: []
+    # Directory for debug screenshots, or null to disable.
+    screenshot_dir: null
+
+telegram:
+  # How many per-email lines are appended to the summary message.
+  max_detail_lines: 15
+  # Show the candidate URL in the dry-run output. Turn off if you share the
+  # chat with anyone.
+  show_urls_in_dry_run: true
+
+logging:
+  level: "INFO"
+  # "text" or "json"
+  format: "text"
+  # Scrub tokens, cookies and addresses from every log record.
+  redact: true

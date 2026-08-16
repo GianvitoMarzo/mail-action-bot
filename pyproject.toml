@@ -1,0 +1,130 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bidoo-bot"
+version = "0.1.0"
+description = "Manually triggered Telegram/CLI bot that finds Bidoo free-bid emails in Gmail and redeems them safely."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+keywords = ["gmail", "telegram", "bot", "automation", "email-parsing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Email",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "httpx>=0.27",
+    "google-api-python-client>=2.130",
+    "google-auth>=2.30",
+    "google-auth-oauthlib>=1.2",
+    "python-telegram-bot>=21.0,<23",
+]
+
+[project.optional-dependencies]
+playwright = ["playwright>=1.45"]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "types-PyYAML>=6.0",
+    "respx>=0.21",
+]
+
+[project.scripts]
+bidoo-bot = "bidoo_bot.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/OWNER/bidoo-bot"
+Issues = "https://github.com/OWNER/bidoo-bot/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bidoo_bot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # comprehensions
+    "SIM",  # flake8-simplify
+    "PTH",  # use pathlib
+    "RUF",  # ruff specific
+    "ARG",  # unused arguments
+    "TID",  # tidy imports
+]
+ignore = [
+    "B008",    # function call in default argument (argparse/typer style)
+    "RUF001",  # "ambiguous" unicode: the user-facing strings are emoji on purpose
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bidoo_bot", "tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = [
+    "googleapiclient.*",
+    "google_auth_oauthlib.*",
+    "google.auth.*",
+    "google.oauth2.*",
+    "bs4.*",
+    "playwright.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# python-telegram-bot's Application is generic in six parameters with no
+# defaults; spelling them out here would break on every PTB release.
+module = "bidoo_bot.adapters.telegram.bot"
+disallow_any_generics = false
+
+[[tool.mypy.overrides]]
+# google-auth ships no type information for this constructor.
+module = "bidoo_bot.adapters.gmail.auth"
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+# Tests use duck-typed stand-ins (a fake Update, a fake Gmail service) on
+# purpose; the strict rules stay on for src/.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+disallow_untyped_calls = false
+warn_unused_ignores = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+asyncio_mode = "auto"
+filterwarnings = ["error::DeprecationWarning:bidoo_bot.*"]
