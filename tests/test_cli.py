@@ -312,15 +312,62 @@ def test_bot_starts_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("argv", "expected"),
+    ("flags", "expected"),
     [([], "INFO"), (["-v"], "INFO"), (["-vv"], "DEBUG"), (["-q"], "WARNING")],
 )
-def test_verbosity_flags(argv: list[str], expected: str) -> None:
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_verbosity_flags_work_on_either_side_of_the_subcommand(
+    flags: list[str], expected: str, position: str
+) -> None:
+    """Regression: `redeem --no-dry-run -v` used to fail with
+    "unrecognized arguments: -v", because the flag was declared only on the
+    top-level parser. Writing it after the subcommand is the natural order."""
     import logging
 
-    run([*argv, "check-config"])
+    argv = [*flags, "check-config"] if position == "before" else ["check-config", *flags]
 
+    code, _ = run(argv)
+
+    assert code == cli.EXIT_OK
     assert logging.getLogger().level == getattr(logging, expected)
+
+
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_config_flag_works_on_either_side(tmp_path: Path, position: str) -> None:
+    import yaml
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.safe_dump({"gmail": {"query": "label:Ordering"}}), "utf-8")
+    flags = ["--config", str(config_file)]
+    argv = [*flags, "check-config"] if position == "before" else ["check-config", *flags]
+
+    code, output = run(argv)
+
+    assert code == cli.EXIT_OK
+    assert "label:Ordering" in output
+
+
+def test_a_flag_after_the_subcommand_does_not_undo_one_given_before() -> None:
+    """The subparser copies default to SUPPRESS precisely for this."""
+    import logging
+
+    code, _ = run(["-vv", "check-config"])
+
+    assert code == cli.EXIT_OK
+    assert logging.getLogger().level == logging.DEBUG
+
+
+def test_redeem_accepts_verbosity_after_its_own_flags(
+    wired: FakeMailbox, redeemer: FakeRedeemer
+) -> None:
+    """The exact shape that used to fail."""
+    wired.messages = [make_email(html=GOOD_HTML)]
+
+    code, output = run(["redeem", "--no-dry-run", "-v"])
+
+    assert code == cli.EXIT_OK
+    assert len(redeemer.calls) == 1
+    assert "Redeemed: 1" in output
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,49 @@ DEFAULT_LOGIN_URL = "https://www.bidoo.com/"
 # ---------------------------------------------------------------------------
 
 
+def _add_common_options(parser: argparse.ArgumentParser, *, sub: bool = False) -> None:
+    """Add the options that work both before and after the subcommand.
+
+    argparse binds an option to the parser that declares it, so a flag declared
+    only at the top level is rejected in `redeem --no-dry-run -v` -- which is
+    exactly how people write it. Declaring them in both places accepts either
+    order.
+
+    The subcommand copies default to SUPPRESS so that leaving a flag out does
+    not overwrite a value given before the subcommand: a subparser parses into
+    a fresh namespace and copies every attribute it holds onto the main one, so
+    an ordinary default would silently undo `bidoo-bot -v redeem`.
+    """
+    absent = argparse.SUPPRESS
+    parser.add_argument(
+        "-c",
+        "--config",
+        type=Path,
+        default=absent if sub else None,
+        help=argparse.SUPPRESS if sub else "path to config.yaml (default: ./config.yaml)",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=absent if sub else 0,
+        help=argparse.SUPPRESS if sub else "more logging (-vv for debug)",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=absent if sub else False,
+        help=argparse.SUPPRESS if sub else "only log warnings and errors",
+    )
+    parser.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default=absent if sub else None,
+        help=argparse.SUPPRESS if sub else "override logging.format",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bidoo-bot",
@@ -67,20 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--version", action="version", version=f"bidoo-bot {__version__}")
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=Path,
-        default=None,
-        help="path to config.yaml (default: ./config.yaml)",
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="count", default=0, help="more logging (-vv for debug)"
-    )
-    parser.add_argument("-q", "--quiet", action="store_true", help="only log warnings and errors")
-    parser.add_argument(
-        "--log-format", choices=("text", "json"), default=None, help="override logging.format"
-    )
+    _add_common_options(parser)
 
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -137,6 +167,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = subparsers.add_parser("check-config", help="validate the configuration and exit")
     check.set_defaults(func=cmd_check_config)
+
+    for subparser in subparsers.choices.values():
+        _add_common_options(subparser, sub=True)
 
     return parser
 

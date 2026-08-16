@@ -363,8 +363,10 @@ python -m bidoo_bot bot                     # start the Telegram bot
 python -m bidoo_bot telegram-whoami         # find your Telegram id (first-time setup)
 ```
 
-`-v` for info, `-vv` for debug, `-q` for quiet. After `pip install` the same
-commands are available as `bidoo-bot ...`.
+`-v` for info, `-vv` for debug, `-q` for quiet. These, along with `--config`
+and `--log-format`, are accepted on either side of the subcommand — both
+`bidoo-bot -v redeem` and `bidoo-bot redeem -v` work. After `pip install` the
+same commands are available as `bidoo-bot ...`.
 
 The Telegram bot answers `/start`, `/help`, `/bidoo` and `/status`. `/bidoo`
 acknowledges immediately ("🔎 Checking your mailbox…"), does the work in a
@@ -522,7 +524,7 @@ pip install -e ".[dev]"
 ruff format .           # format
 ruff check .            # lint
 mypy                    # type check (strict on src/)
-pytest                  # 273 tests, no network, no credentials
+pytest                  # 281 tests, no network, no credentials
 ```
 
 Every test runs against the packaged defaults and uses in-memory fakes for
