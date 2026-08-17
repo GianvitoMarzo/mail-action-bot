@@ -261,8 +261,9 @@ put one in a repository.
    - User type: **External** is fine for a personal project.
    - Fill in the app name and your email.
    - Under **Audience**, add your own Google account as a **Test user**.
-     While the app is in "Testing" you do not need Google's verification, but
-     the refresh token expires after 7 days — see
+   - Then click **Publish app** to move the status from *Testing* to
+     *In production*. This needs no verification, and it is what stops the
+     refresh token from expiring every 7 days — see
      [Troubleshooting](#troubleshooting).
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID:**
    - Application type: **Desktop app** (required — the login flow runs a
@@ -588,9 +589,26 @@ hand-written inventions — **no real Bidoo email is in this repository.**
 **`Gmail is not authorised yet`** — run `python -m bidoo_bot gmail-auth`.
 
 **Login stops working after 7 days** — while the OAuth consent screen is in
-"Testing", Google expires refresh tokens after a week. Either re-run
-`gmail-auth`, or publish the app (Audience → Publish; for a personal app with
-only your own account this is fine and needs no verification for these scopes).
+**Testing**, Google issues refresh tokens that expire after 7 days. The fix is
+to publish the app:
+
+1. Google Cloud Console → **Google Auth Platform → Audience → Publish app**
+   (status goes from *Testing* to *In production*).
+2. **Delete `secrets/gmail_token.json` and re-run `gmail-auth`.** Publishing
+   does not extend the token you already have — it was issued under the old
+   status. You need a fresh consent to get a long-lived one.
+
+Publishing does **not** require Google's verification: you can publish an
+unverified app, and the 7-day expiry is tied to the *Testing* status, not to
+verification. Because `gmail.modify` is a restricted scope you will see an
+"Google hasn't verified this app" screen on that first consent — click
+**Advanced → Go to … (unsafe)**. For a personal app where you are the only
+user that is expected; verification only matters for distributing it to others
+(and unverified apps are capped at 100 users, which you will never reach).
+
+Even in production a refresh token can still be invalidated: revoking access,
+six months without use, or — specific to Gmail scopes — **changing your Google
+password**. In those cases just re-run `gmail-auth`.
 
 **`Gmail refused the request (HTTP 403)`** — the Gmail API is not enabled on
 the project, or the token predates a scope change. Enable it, delete
